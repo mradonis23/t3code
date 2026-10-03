@@ -8,6 +8,7 @@ import * as TestClock from "effect/testing/TestClock";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import {
+  absolutizeResolvedSpawnExecutable,
   CommandAvailability,
   CommandResolutionCache,
   type CommandAvailabilityChecker,
@@ -475,6 +476,17 @@ effectIt.layer(NodeServices.layer)("resolveCommandPath", (it) => {
   );
 });
 
+describe("absolutizeResolvedSpawnExecutable", () => {
+  it("anchors relative Windows shims to the resolver cwd before a child changes cwd", () => {
+    expect(
+      absolutizeResolvedSpawnExecutable(
+        ".\\node_modules\\.bin\\vp.cmd",
+        "win32",
+        "C:\\repo\\t3code",
+      ),
+    ).toBe("C:\\repo\\t3code\\node_modules\\.bin\\vp.cmd");
+  });
+});
 effectIt.layer(NodeServices.layer)("resolveSpawnCommand", (it) => {
   it.effect("runs Windows executables directly without a shell", () =>
     Effect.gen(function* () {

@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off
+﻿// @effect-diagnostics nodeBuiltinImport:off
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeChildProcess from "node:child_process";
@@ -84,6 +84,15 @@ export interface ResolvedSpawnCommand {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
   readonly shell: boolean;
+}
+
+export function absolutizeResolvedSpawnExecutable(
+  resolvedCommand: string,
+  platform: NodeJS.Platform,
+  cwd = process.cwd(),
+): string {
+  const path = platform === "win32" ? NodePath.win32 : NodePath.posix;
+  return path.isAbsolute(resolvedCommand) ? resolvedCommand : path.resolve(cwd, resolvedCommand);
 }
 
 export type SpawnExecutableResolver = (
@@ -644,7 +653,11 @@ export const resolveSpawnCommand = Effect.fn("shell.resolveSpawnCommand")(functi
         ? { ...hostEnvironment, ...options.env }
         : options.env;
   const resolveExecutable = yield* SpawnExecutableResolution;
-  const resolvedCommand = resolveExecutable(command, platform, env) ?? command;
+  const resolvedExecutable = resolveExecutable(command, platform, env);
+  const resolvedCommand =
+    resolvedExecutable === undefined
+      ? command
+      : absolutizeResolvedSpawnExecutable(resolvedExecutable, platform);
   const extension = NodePath.win32.extname(resolvedCommand).toLowerCase();
   if (extension !== ".cmd" && extension !== ".bat") {
     return { command: resolvedCommand, args: [...args], shell: false };
