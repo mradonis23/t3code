@@ -33,7 +33,9 @@ import { ServerConfig } from "../config.ts";
 import { makeAntigravityAcpRuntime } from "./acp/AntigravityAcpSupport.ts";
 import {
   buildAntigravityAcpSpawnInput,
+  isOwnedWindowsAntigravityScratchDirectory,
   prepareAntigravityProfile,
+  resolveWindowsAntigravityScratchDirectory,
 } from "./antigravityAuthSupport.ts";
 import {
   resolveAntigravityReleaseAsset,
@@ -43,6 +45,7 @@ import {
 const DRIVER = ProviderDriverKind.make("antigravity");
 const DOWNLOAD_TIMEOUT = "45 minutes";
 const VALIDATION_TIMEOUT = "90 seconds";
+const ANTIGRAVITY_PROCESS_KILL_FORCE_AFTER = "10 seconds";
 const FREE_SPACE_MARGIN = 256 * 1024 * 1024;
 const RECORD_MAX_BYTES = 8 * 1024;
 const RELEASE_RECORD = ".install-complete.json";
@@ -476,12 +479,46 @@ export const makeAntigravityInstallation = Effect.fn("AntigravityInstallation.ma
           platform,
           baseEnv: environment,
         });
+        const scratchDirectory =
+          platform === "win32"
+            ? resolveWindowsAntigravityScratchDirectory(
+                yield* crypto.randomUUIDv4.pipe(
+                  Effect.mapError((cause) =>
+                    installationError(
+                      "verify",
+                      "Could not allocate an Antigravity validation scratch identifier.",
+                      cause,
+                    ),
+                  ),
+                ),
+              )
+            : undefined;
+        if (scratchDirectory !== undefined) {
+          yield* fs
+            .makeDirectory(scratchDirectory, { recursive: true })
+            .pipe(
+              Effect.mapError((cause) =>
+                installationError(
+                  "verify",
+                  "Could not create the Antigravity validation scratch directory.",
+                  cause,
+                ),
+              ),
+            );
+          yield* Effect.addFinalizer(() =>
+            isOwnedWindowsAntigravityScratchDirectory(scratchDirectory)
+              ? fs.remove(scratchDirectory, { recursive: true, force: true }).pipe(Effect.ignore)
+              : Effect.void,
+          );
+        }
         const runtime = yield* makeAntigravityAcpRuntime({
+          processKillForceAfter: ANTIGRAVITY_PROCESS_KILL_FORCE_AFTER,
           spawn: buildAntigravityAcpSpawnInput({
             installation: executable,
             profile,
             cwd: profileDirectory,
             baseEnv: environment,
+            ...(scratchDirectory === undefined ? {} : { scratchDirectory }),
           }),
           cwd: profileDirectory,
           childProcessSpawner: spawner,

@@ -247,6 +247,9 @@ export const makeAntigravityProvider = Effect.fn("makeAntigravityProvider")(func
     haveSettingsChanged: () => false,
     initialSnapshot: () => getSnapshot,
     checkProvider: checkProvider(),
+    // Antigravity's health probe launches a heavyweight native ACP process on Windows.
+    // Keep initial and explicit/manual refreshes, but never poll it on the generic interval.
+    refreshOnInterval: false,
     enrichSnapshot: ({ publishSnapshot }) =>
       SubscriptionRef.changes(metadata).pipe(
         Stream.runForEach((state) =>

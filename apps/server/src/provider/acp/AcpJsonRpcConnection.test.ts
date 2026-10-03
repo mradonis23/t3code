@@ -14,6 +14,7 @@ import * as Option from "effect/Option";
 import * as Scope from "effect/Scope";
 import * as TestClock from "effect/testing/TestClock";
 import * as Stream from "effect/Stream";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import { describe, expect } from "vite-plus/test";
 
 import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
@@ -32,6 +33,37 @@ const mockRuntimeOptions = {
 } satisfies AcpSessionRuntime.AcpSessionRuntimeOptions;
 
 describe("AcpSessionRuntime", () => {
+  it.effect(
+    "passes an optional process kill grace to the scoped child command without changing the default",
+    () =>
+      Effect.gen(function* () {
+        const baseSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const observed: Array<unknown> = [];
+        const observingSpawner = ChildProcessSpawner.make((command) => {
+          if (command._tag === "StandardCommand") observed.push(command.options.forceKillAfter);
+          return baseSpawner.spawn(command);
+        });
+
+        yield* Effect.scoped(
+          AcpSessionRuntime.make({
+            ...mockRuntimeOptions,
+            processKillForceAfter: "10 seconds",
+          }).pipe(
+            Effect.flatMap((runtime) => runtime.initialize()),
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, observingSpawner),
+          ),
+        );
+        yield* Effect.scoped(
+          AcpSessionRuntime.make(mockRuntimeOptions).pipe(
+            Effect.flatMap((runtime) => runtime.initialize()),
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, observingSpawner),
+          ),
+        );
+
+        expect(observed).toEqual(["10 seconds", undefined]);
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   for (const setupMethod of ["session/new", "session/resume"] as const) {
     it.effect(`buffers root metadata while ${setupMethod} startup is still pending`, () =>
       Effect.gen(function* () {

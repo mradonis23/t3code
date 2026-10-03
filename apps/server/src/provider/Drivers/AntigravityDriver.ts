@@ -27,8 +27,10 @@ import {
   antigravityAuthUsesBrowser,
   buildAntigravityAcpSpawnInput,
   isAntigravitySignInRequiredError,
+  isOwnedWindowsAntigravityScratchDirectory,
   prepareAntigravityProfile,
   resolveAntigravityProfileDirectory,
+  resolveWindowsAntigravityScratchDirectory,
   type AntigravityAuthConfig,
 } from "../antigravityAuthSupport.ts";
 import {
@@ -54,6 +56,8 @@ import { discoverAntigravitySkills, resolveAntigravityUserHome } from "./Antigra
 
 const DRIVER = ProviderDriverKind.make("antigravity");
 const decodeSettings = Schema.decodeSync(AntigravitySettings);
+const ANTIGRAVITY_PROCESS_KILL_FORCE_AFTER = "10 seconds";
+const ANTIGRAVITY_SCRATCH_CLEANUP_RETRY_DELAYS = ["250 millis", "1 second", "3 seconds"] as const;
 
 export type AntigravityDriverEnv =
   | AntigravityInstallation
@@ -92,11 +96,53 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
       };
       const authConfigIssue = antigravityAuthConfigIssue(auth);
       const processEnvironment = mergeProviderInstanceEnvironment(environment);
-      const userHome = resolveAntigravityUserHome(yield* HostProcessPlatform, processEnvironment);
+      const hostPlatform = yield* HostProcessPlatform;
+      const userHome = resolveAntigravityUserHome(hostPlatform, processEnvironment);
       const profileDirectory = resolveAntigravityProfileDirectory(
         serverConfig.stateDir,
         instanceId,
       );
+      const cleanupLaunchScratch = Effect.fn("AntigravityDriver.cleanupLaunchScratch")(function* (
+        scratchDirectory: string,
+      ) {
+        if (!isOwnedWindowsAntigravityScratchDirectory(scratchDirectory)) {
+          yield* Effect.logWarning("Antigravity refused to clean an unowned scratch directory.", {
+            scratchDirectory,
+          });
+          return;
+        }
+        const exists = () =>
+          fileSystem.exists(scratchDirectory).pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("Antigravity could not inspect launch scratch during cleanup.", {
+                scratchDirectory,
+                cause,
+              }).pipe(Effect.as(true)),
+            ),
+          );
+        for (
+          let attempt = 0;
+          attempt <= ANTIGRAVITY_SCRATCH_CLEANUP_RETRY_DELAYS.length;
+          attempt++
+        ) {
+          if (!(yield* exists())) return;
+          yield* fileSystem.remove(scratchDirectory, { recursive: true, force: true }).pipe(
+            Effect.catch((cause) =>
+              Effect.logWarning("Antigravity launch scratch cleanup attempt failed.", {
+                scratchDirectory,
+                attempt,
+                cause,
+              }),
+            ),
+          );
+          if (!(yield* exists())) return;
+          const delay = ANTIGRAVITY_SCRATCH_CLEANUP_RETRY_DELAYS[attempt];
+          if (delay !== undefined) yield* Effect.sleep(delay);
+        }
+        yield* Effect.logWarning("Antigravity launch scratch remained after bounded cleanup.", {
+          scratchDirectory,
+        });
+      });
       const continuationIdentity = defaultProviderContinuationIdentity({
         driverKind: DRIVER,
         instanceId,
@@ -154,8 +200,37 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
           Effect.provideService(Path.Path, path),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         );
+        const scratchDirectory =
+          hostPlatform === "win32"
+            ? resolveWindowsAntigravityScratchDirectory(
+                yield* crypto.randomUUIDv4.pipe(
+                  Effect.mapError(
+                    () =>
+                      new ProviderSetupError({
+                        instanceId,
+                        operation: "start",
+                        detail: "Could not allocate an Antigravity launch scratch identifier.",
+                      }),
+                  ),
+                ),
+              )
+            : undefined;
+        if (scratchDirectory !== undefined) {
+          yield* Effect.addFinalizer(() => cleanupLaunchScratch(scratchDirectory));
+          yield* fileSystem.makeDirectory(scratchDirectory, { recursive: true }).pipe(
+            Effect.mapError(
+              () =>
+                new ProviderSetupError({
+                  instanceId,
+                  operation: "start",
+                  detail: "Could not create the Antigravity launch scratch directory.",
+                }),
+            ),
+          );
+        }
         const runtime = yield* makeAntigravityAcpRuntime({
           ...input,
+          processKillForceAfter: ANTIGRAVITY_PROCESS_KILL_FORCE_AFTER,
           authMethod: auth.authMethod,
           childProcessSpawner: spawner,
           spawn: buildAntigravityAcpSpawnInput({
@@ -164,6 +239,7 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
             cwd: input.cwd,
             baseEnv: processEnvironment,
             auth,
+            ...(scratchDirectory === undefined ? {} : { scratchDirectory }),
           }),
         }).pipe(Effect.provideService(Crypto.Crypto, crypto));
         return {

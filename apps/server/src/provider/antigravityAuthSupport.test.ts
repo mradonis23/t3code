@@ -28,11 +28,14 @@ import {
   antigravityProfileSettings,
   buildAntigravityAcpSpawnInput,
   isAntigravitySignInRequiredError,
+  isOwnedWindowsAntigravityScratchDirectory,
   makeAntigravityStderrHandler,
   makeAntigravityStdoutTransform,
   parseAntigravityAuthorizationUrl,
   prepareAntigravityProfile,
   resolveAntigravityProfileDirectory,
+  resolveWindowsAntigravityScratchDirectory,
+  WINDOWS_ANTIGRAVITY_SCRATCH_ROOT,
 } from "./antigravityAuthSupport.ts";
 
 const authorizationUrl =
@@ -103,6 +106,101 @@ describe("Antigravity process environment", () => {
         ELECTRON_RUN_AS_NODE: "1",
       },
     });
+  });
+
+  it("leaves non-Windows TEMP/TMP untouched when no owned Windows scratch is used", () => {
+    const baseEnv = {
+      TEMP: "/ambient/temp",
+      TMP: "/ambient/tmp",
+      PATH: "/usr/bin",
+    };
+    const spawn = buildAntigravityAcpSpawnInput({
+      installation: { executablePath: "/release/acp", harnessPath: "/release/harness" },
+      profile,
+      cwd: "/project",
+      baseEnv,
+    });
+    expect(spawn.env?.TEMP).toBe("/ambient/temp");
+    expect(spawn.env?.TMP).toBe("/ambient/tmp");
+    expect(baseEnv).toEqual({
+      TEMP: "/ambient/temp",
+      TMP: "/ambient/tmp",
+      PATH: "/usr/bin",
+    });
+  });
+
+  it("isolates each Windows Antigravity launch in an owned scratch directory", () => {
+    const scratchDirectory = resolveWindowsAntigravityScratchDirectory(
+      "123e4567-e89b-42d3-a456-426614174000",
+    );
+    const baseEnv = {
+      TEMP: "C:\\ambient-temp",
+      TMP: "C:\\ambient-tmp",
+      tmp: "C:\\ambient-tmp-lowercase",
+      Path: "C:\\Windows\\System32",
+      KEEP_ME: "preserved",
+    };
+    const spawn = buildAntigravityAcpSpawnInput({
+      installation: {
+        executablePath: "C:\\agy\\agy_acp_server.exe",
+        harnessPath: "C:\\agy\\localharness_external.exe",
+      },
+      profile: {
+        platform: "win32",
+        geminiHome: "C:\\profile",
+        acpDirectory: "C:\\profile\\antigravity-acp",
+        tokenPath: "C:\\profile\\antigravity-acp\\acp_token.json",
+        browserCommand: "browser",
+      },
+      cwd: "C:\\workspace",
+      baseEnv,
+      scratchDirectory,
+    });
+    const environment = spawn.env ?? {};
+
+    expect(scratchDirectory.startsWith(WINDOWS_ANTIGRAVITY_SCRATCH_ROOT)).toBe(true);
+    expect(isOwnedWindowsAntigravityScratchDirectory(scratchDirectory)).toBe(true);
+    expect(environment.TEMP).toBe(scratchDirectory);
+    expect(environment.TMP).toBe(scratchDirectory);
+    expect(environment).not.toHaveProperty("tmp");
+    expect(environment.Path).toBe("C:\\Windows\\System32");
+    expect(environment.KEEP_ME).toBe("preserved");
+    expect(baseEnv.TEMP).toBe("C:\\ambient-temp");
+    expect(baseEnv.TMP).toBe("C:\\ambient-tmp");
+    expect(baseEnv.tmp).toBe("C:\\ambient-tmp-lowercase");
+  });
+
+  it("derives distinct exact roots for concurrent Windows Antigravity launches", () => {
+    const first = resolveWindowsAntigravityScratchDirectory("123e4567-e89b-42d3-a456-426614174000");
+    const second = resolveWindowsAntigravityScratchDirectory(
+      "123e4567-e89b-42d3-a456-426614174001",
+    );
+
+    expect(first).not.toBe(second);
+    expect(isOwnedWindowsAntigravityScratchDirectory(first)).toBe(true);
+    expect(isOwnedWindowsAntigravityScratchDirectory(second)).toBe(true);
+  });
+
+  it("rejects a Windows scratch directory outside the owned Antigravity namespace", () => {
+    expect(() =>
+      buildAntigravityAcpSpawnInput({
+        installation: {
+          executablePath: "C:\\agy\\agy_acp_server.exe",
+          harnessPath: "C:\\agy\\localharness_external.exe",
+        },
+        profile: {
+          platform: "win32",
+          geminiHome: "C:\\profile",
+          acpDirectory: "C:\\profile\\antigravity-acp",
+          tokenPath: "C:\\profile\\antigravity-acp\\acp_token.json",
+          browserCommand: "browser",
+        },
+        cwd: "C:\\workspace",
+        baseEnv: {},
+        scratchDirectory: "F:\\RuntimeScratch\\T3\\not-owned",
+      }),
+    ).toThrow(/outside the owned launch namespace/u);
+    expect(() => resolveWindowsAntigravityScratchDirectory("not-a-uuid")).toThrow(/UUID v4/u);
   });
 
   it("passes only the configured method's credential and keeps the GCP pair out of the environment", () => {

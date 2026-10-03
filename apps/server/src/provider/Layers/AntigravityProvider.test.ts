@@ -305,6 +305,38 @@ it.layer(testLayer)("Antigravity provider snapshots", (it) => {
     ),
   );
 
+  it.effect("does not run periodic Antigravity health probes but keeps manual refresh", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const probeCalls = yield* Ref.make(0);
+        const initialProbeDone = yield* Deferred.make<void>();
+        const provider = yield* makeAntigravityProvider(decodeSettings({ enabled: true }), {
+          stampIdentity: (snapshot) => Effect.succeed({ ...snapshot, instanceId, driver }),
+          probe: Ref.updateAndGet(probeCalls, (count) => count + 1).pipe(
+            Effect.tap(() => Deferred.succeed(initialProbeDone, undefined).pipe(Effect.ignore)),
+            Effect.as(initializeResult),
+          ),
+          supportsTextGeneration: Effect.succeed(true),
+        }).pipe(
+          Effect.provide(
+            Layer.mock(BackgroundPolicy.BackgroundPolicy)({
+              shouldRunScopeWork: () => Effect.succeed(true),
+            }),
+          ),
+        );
+
+        yield* Deferred.await(initialProbeDone);
+        expect(yield* Ref.get(probeCalls)).toBe(1);
+        yield* TestClock.adjust("15 minutes");
+        yield* Effect.yieldNow;
+        expect(yield* Ref.get(probeCalls)).toBe(1);
+
+        yield* provider.snapshot.refresh;
+        expect(yield* Ref.get(probeCalls)).toBe(2);
+      }),
+    ),
+  );
+
   it.effect("publishes session metadata and native commands without another health probe", () =>
     Effect.scoped(
       Effect.gen(function* () {

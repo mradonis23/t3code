@@ -59,6 +59,25 @@ const browserHelperSource =
   `"${ANTIGRAVITY_AUTH_BROWSER_MARKER}"+JSON.stringify(process.argv[1])+"\\n",` +
   `()=>process.exit(0))`;
 const browserPreflightUrl = "https://example.invalid/t3-antigravity-browser-preflight";
+export const WINDOWS_ANTIGRAVITY_SCRATCH_ROOT = "F:\\RuntimeScratch\\T3\\antigravity";
+const windowsAntigravityLaunchIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+export function resolveWindowsAntigravityScratchDirectory(launchId: string): string {
+  if (!windowsAntigravityLaunchIdPattern.test(launchId)) {
+    throw new TypeError("Antigravity launch id must be a UUID v4.");
+  }
+  return NodePath.win32.join(WINDOWS_ANTIGRAVITY_SCRATCH_ROOT, launchId);
+}
+
+export function isOwnedWindowsAntigravityScratchDirectory(directory: string): boolean {
+  const resolved = NodePath.win32.resolve(directory);
+  return (
+    NodePath.win32.dirname(resolved).toLowerCase() ===
+      NodePath.win32.resolve(WINDOWS_ANTIGRAVITY_SCRATCH_ROOT).toLowerCase() &&
+    windowsAntigravityLaunchIdPattern.test(NodePath.win32.basename(resolved))
+  );
+}
 
 const removedEnvironmentKeys = new Set([
   "GEMINI_API_KEY",
@@ -199,11 +218,21 @@ function antigravityEnvironment(
   profile: AntigravityProfile,
   baseEnv: NodeJS.ProcessEnv,
   auth: AntigravityAuthConfig,
+  scratchDirectory?: string,
 ) {
   const environment: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(baseEnv)) {
     // Windows treats environment keys as case-insensitive. Remove aliases too.
-    if (!removedEnvironmentKeys.has(key.toUpperCase())) environment[key] = value;
+    const normalizedKey = key.toUpperCase();
+    if (removedEnvironmentKeys.has(normalizedKey)) continue;
+    if (
+      profile.platform === "win32" &&
+      scratchDirectory !== undefined &&
+      (normalizedKey === "TEMP" || normalizedKey === "TMP")
+    ) {
+      continue;
+    }
+    environment[key] = value;
   }
   // Only the configured method's credential reaches the agent. The agent
   // prefers GOOGLE_API_KEY over the GCP pair for Agent Platform, so the pair
@@ -217,6 +246,9 @@ function antigravityEnvironment(
   return {
     ...environment,
     ...credential,
+    ...(profile.platform === "win32" && scratchDirectory !== undefined
+      ? { TEMP: scratchDirectory, TMP: scratchDirectory }
+      : {}),
     GEMINI_HOME: profile.geminiHome,
     AGY_ACP_FORCE_FILE_STORAGE: "1",
     BROWSER: profile.browserCommand,
@@ -400,7 +432,17 @@ export function buildAntigravityAcpSpawnInput(input: {
   readonly cwd: string;
   readonly baseEnv?: NodeJS.ProcessEnv;
   readonly auth?: AntigravityAuthConfig;
+  readonly scratchDirectory?: string;
 }): AcpSpawnInput {
+  if (
+    input.profile.platform === "win32" &&
+    input.scratchDirectory !== undefined &&
+    !isOwnedWindowsAntigravityScratchDirectory(input.scratchDirectory)
+  ) {
+    throw new TypeError(
+      "Antigravity Windows scratch directory is outside the owned launch namespace.",
+    );
+  }
   return {
     command: input.installation.executablePath,
     args: input.profile.platform === "linux" ? ["--uid="] : [],
@@ -410,6 +452,7 @@ export function buildAntigravityAcpSpawnInput(input: {
         input.profile,
         input.baseEnv ?? process.env,
         input.auth ?? ANTIGRAVITY_PERSONAL_AUTH,
+        input.scratchDirectory,
       ),
       ANTIGRAVITY_HARNESS_PATH: input.installation.harnessPath,
     },

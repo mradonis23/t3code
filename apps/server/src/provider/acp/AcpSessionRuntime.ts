@@ -87,6 +87,8 @@ export interface AcpSessionRuntimeOptions {
   /** Native cancellation waits for the prompt response and the getEvents consumer to drain. */
   readonly cancelBehavior?: "interrupt" | "wait-for-prompt";
   readonly cancelTimeout?: Duration.Input;
+  /** Grace period before a runtime process is force-killed after graceful shutdown fails. */
+  readonly processKillForceAfter?: Duration.Input;
   readonly clientCapabilities?: EffectAcpSchema.InitializeRequest["clientCapabilities"];
   readonly clientInfo: {
     readonly name: string;
@@ -359,6 +361,7 @@ export const make = (
     const promptDispatchSemaphore = yield* Semaphore.make(1);
     const activePromptRef = yield* Ref.make<Option.Option<AcpActivePrompt>>(Option.none());
     const sessionLoadGateRef = yield* Ref.make<Option.Option<SessionLoadGate>>(Option.none());
+    const processKillForceAfter = options.processKillForceAfter ?? "1 second";
 
     const ensureConnected = Effect.gen(function* () {
       const error = yield* Ref.get(terminationErrorRef);
@@ -435,6 +438,9 @@ export const make = (
           ...(options.spawn.cwd ? { cwd: options.spawn.cwd } : {}),
           ...(options.spawn.env ? { env: options.spawn.env } : {}),
           extendEnv: options.spawn.extendEnv ?? true,
+          ...(options.processKillForceAfter !== undefined
+            ? { forceKillAfter: options.processKillForceAfter }
+            : {}),
           shell: spawnCommand.shell,
         }),
       )
@@ -460,7 +466,7 @@ export const make = (
             Effect.gen(function* () {
               yield* Deferred.fail(stderrFailure, error);
               yield* recordTermination(error);
-              yield* child.kill({ forceKillAfter: "1 second" }).pipe(Effect.ignore);
+              yield* child.kill({ forceKillAfter: processKillForceAfter }).pipe(Effect.ignore);
             }),
           ),
         ),
@@ -913,7 +919,7 @@ export const make = (
       error: EffectAcpErrors.AcpError,
     ) {
       yield* recordTermination(error);
-      yield* child.kill({ forceKillAfter: "1 second" }).pipe(Effect.ignore);
+      yield* child.kill({ forceKillAfter: processKillForceAfter }).pipe(Effect.ignore);
     });
 
     const cancel = Effect.gen(function* () {
