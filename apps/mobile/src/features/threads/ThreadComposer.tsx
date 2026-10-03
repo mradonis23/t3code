@@ -90,6 +90,13 @@ import {
   type ExistingThreadSettingsRouteSession,
   useExistingThreadSettingsRoutePresentation,
 } from "./ThreadSettingsSheet";
+import type { ComposerSendIntent, QueuedThreadMessage } from "../../state/thread-outbox-model";
+import { CheckpointContinuationModal } from "./CheckpointContinuationModal";
+import {
+  resolveCheckpointContinuationDeliveryMode,
+  type CheckpointContinuation,
+  type CheckpointContinuationSubmissionIntent,
+} from "./checkpointContinuation.logic";
 import {
   useThreadSettingsSheetPresentation,
   type NavigationWithFinishTransitioning,
@@ -120,6 +127,7 @@ export interface ThreadComposerProps {
   readonly hasCompactableConversation: boolean;
   readonly serverConfig: T3ServerConfig | null;
   readonly queueCount: number;
+  readonly checkpointContinuation: CheckpointContinuation | null;
   readonly environmentId: EnvironmentId;
   readonly projectCwd: string | null;
   readonly editorRef?: RefObject<ComposerEditorHandle | null>;
@@ -129,7 +137,11 @@ export interface ThreadComposerProps {
   readonly onNativePasteImages: (uris: ReadonlyArray<string>) => Promise<void>;
   readonly onRemoveDraftImage: (imageId: string) => void;
   readonly onStopThread: () => void;
-  readonly onSendMessage: () => Promise<MessageId | null>;
+  readonly onSendMessage: (intent?: ComposerSendIntent) => Promise<MessageId | null>;
+  readonly onQueueCheckpointContinuation: (
+    text: string,
+    deliveryMode: NonNullable<QueuedThreadMessage["deliveryMode"]>,
+  ) => Promise<boolean>;
   /** `/usage-limits` resolves locally; the host decides where the report shows. Null clears it. */
   readonly onShowUsageLimits: (report: UsageLimitsReport | null) => void;
   readonly onUpdateModelSelection: (modelSelection: ModelSelection) => void;
@@ -317,14 +329,15 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
 
   const [previewFile, setPreviewFile] = useState<FilePreviewSource | null>(null);
   const [previewVideo, setPreviewVideo] = useState<VideoPreviewSource | null>(null);
+  const [continuationVisible, setContinuationVisible] = useState(false);
   const hasContent = props.draftMessage.trim().length > 0 || props.draftAttachments.length > 0;
-  const showStopAction =
-    !hasContent &&
-    (props.selectedThread.session?.status === "running" ||
-      props.selectedThread.session?.status === "starting");
+  const threadBusy =
+    props.selectedThread.session?.status === "running" ||
+    props.selectedThread.session?.status === "starting";
+  const showStopAction = !hasContent && threadBusy;
 
   const sendLabel =
-    props.connectionState !== "connected" || props.queueCount > 0 ? "Queue" : "Send";
+    props.connectionState !== "connected" || threadBusy || props.queueCount > 0 ? "Queue" : "Send";
   const currentModelSelection = props.selectedThread.modelSelection;
   const currentRuntimeMode = props.selectedThread.runtimeMode;
   const modelUnavailable =
@@ -510,6 +523,27 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     voiceInput.blocksSubmission,
   ]);
 
+  const handleSteer = useCallback(async () => {
+    if (voiceInput.blocksSubmission || !threadBusy) return;
+    await onSendMessage("steer");
+  }, [onSendMessage, threadBusy, voiceInput.blocksSubmission]);
+
+  const submitCheckpointContinuation = useCallback(
+    async (text: string, intent: CheckpointContinuationSubmissionIntent) => {
+      const continuation = props.checkpointContinuation;
+      if (!continuation) return false;
+      return await props.onQueueCheckpointContinuation(
+        text,
+        resolveCheckpointContinuationDeliveryMode({
+          intent,
+          continuationKind: continuation.kind,
+          threadBusy,
+        }),
+      );
+    },
+    [props.checkpointContinuation, props.onQueueCheckpointContinuation, threadBusy],
+  );
+
   // ── Model menu ───────────────────────────────────────────
   const modelOptions = useMemo(
     () => buildModelOptions(props.serverConfig, currentModelSelection),
@@ -632,6 +666,21 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               onSelect={composerMenu.onSelect}
             />
           </View>
+        ) : null}
+
+        {props.checkpointContinuation ? (
+          <Pressable
+            accessibilityLabel="Continue from checkpoint"
+            accessibilityRole="button"
+            onPress={() => setContinuationVisible(true)}
+            className="mx-3 mb-2 rounded-2xl border border-border bg-card px-3.5 py-3 active:opacity-70"
+          >
+            <Text className="text-sm font-t3-bold text-foreground">Continue from checkpoint</Text>
+            <Text className="mt-0.5 text-xs leading-4 text-foreground-muted" numberOfLines={2}>
+              The last turn ended without confirmed completion. Review and continue from preserved
+              evidence.
+            </Text>
+          </Pressable>
         ) : null}
 
         {connectionStatus ? (
@@ -774,13 +823,25 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                     onPress={props.onStopThread}
                   />
                 ) : (
-                  <ComposerActionButton
-                    accessibilityLabel={attachmentBlockReason ?? sendLabel}
-                    icon="arrow.up"
-                    variant="primary"
-                    disabled={!canSend}
-                    onPress={handleSend}
-                  />
+                  <View className="flex-row items-center">
+                    {threadBusy && hasContent ? (
+                      <ComposerActionButton
+                        accessibilityLabel="Steer the active turn"
+                        icon="arrow.up.right"
+                        label="Steer"
+                        disabled={!canSend || props.connectionState !== "connected"}
+                        onPress={handleSteer}
+                      />
+                    ) : null}
+                    <ComposerActionButton
+                      accessibilityLabel={attachmentBlockReason ?? sendLabel}
+                      icon="arrow.up"
+                      label={threadBusy && hasContent ? "Queue" : undefined}
+                      variant="primary"
+                      disabled={!canSend}
+                      onPress={handleSend}
+                    />
+                  </View>
                 )}
               </View>
             ) : null}
@@ -865,13 +926,25 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                       onPress={props.onStopThread}
                     />
                   ) : voicePresentation.showsSend ? (
-                    <ComposerActionButton
-                      accessibilityLabel={attachmentBlockReason ?? sendLabel}
-                      icon="arrow.up"
-                      variant="primary"
-                      disabled={!canSend}
-                      onPress={handleSend}
-                    />
+                    <View className="flex-row items-center">
+                      {threadBusy && hasContent ? (
+                        <ComposerActionButton
+                          accessibilityLabel="Steer the active turn"
+                          icon="arrow.up.right"
+                          label="Steer"
+                          disabled={!canSend || props.connectionState !== "connected"}
+                          onPress={handleSteer}
+                        />
+                      ) : null}
+                      <ComposerActionButton
+                        accessibilityLabel={attachmentBlockReason ?? sendLabel}
+                        icon="arrow.up"
+                        label={threadBusy && hasContent ? "Queue" : undefined}
+                        variant="primary"
+                        disabled={!canSend}
+                        onPress={handleSend}
+                      />
+                    </View>
                   ) : null}
                 </View>
               </ComposerToolbarRow>
@@ -890,6 +963,17 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         ) : null}
       </Animated.View>
 
+      {props.checkpointContinuation ? (
+        <CheckpointContinuationModal
+          visible={continuationVisible}
+          continuation={props.checkpointContinuation}
+          connectionState={props.connectionState}
+          sessionStatus={props.selectedThread.session?.status ?? null}
+          latestTurnState={props.selectedThread.latestTurn?.state ?? null}
+          onClose={() => setContinuationVisible(false)}
+          onSubmit={submitCheckpointContinuation}
+        />
+      ) : null}
       <VideoPreviewModal source={previewVideo} onRequestClose={closePreview} />
       <FilePreviewModal source={previewFile} onRequestClose={closePreview} />
     </Animated.View>

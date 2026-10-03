@@ -258,6 +258,7 @@ export interface DesktopServerExposureBackendConfig {
   readonly port: number;
   readonly bindHost: string;
   readonly httpBaseUrl: URL;
+  readonly attachExisting?: boolean;
   readonly tailscaleServeEnabled: boolean;
   readonly tailscaleServePort: number;
 }
@@ -274,6 +275,7 @@ export class DesktopServerExposure extends Context.Service<
     readonly backendConfig: Effect.Effect<DesktopServerExposureBackendConfig>;
     readonly configureFromSettings: (input: {
       readonly port: number;
+      readonly attachExisting?: boolean;
     }) => Effect.Effect<DesktopServerExposureState>;
     readonly setMode: (
       mode: DesktopServerExposureMode,
@@ -291,6 +293,7 @@ interface RuntimeState {
   readonly mode: DesktopServerExposureMode;
   readonly port: number;
   readonly bindHost: string;
+  readonly attachExisting: boolean;
   readonly localHttpUrl: string;
   readonly localWsUrl: string;
   readonly httpBaseUrl: URL;
@@ -315,6 +318,7 @@ const initialRuntimeState = (): RuntimeState =>
       networkInterfaces: {},
     }),
     port: 0,
+    attachExisting: false,
   });
 
 const toContractState = (state: RuntimeState): DesktopServerExposureState => ({
@@ -329,6 +333,7 @@ const toBackendConfig = (state: RuntimeState): DesktopServerExposureBackendConfi
   port: state.port,
   bindHost: state.bindHost,
   httpBaseUrl: state.httpBaseUrl,
+  attachExisting: state.attachExisting,
   tailscaleServeEnabled: state.tailscaleServeEnabled,
   tailscaleServePort: state.tailscaleServePort,
 });
@@ -347,12 +352,14 @@ function runtimeStateFromResolvedExposure(input: {
   readonly settings: DesktopAppSettings.DesktopSettings;
   readonly exposure: ResolvedDesktopServerExposure;
   readonly port: number;
+  readonly attachExisting: boolean;
 }): RuntimeState {
   return {
     requestedMode: input.requestedMode,
     mode: input.exposure.mode,
     port: input.port,
     bindHost: input.exposure.bindHost,
+    attachExisting: input.attachExisting,
     localHttpUrl: input.exposure.localHttpUrl,
     localWsUrl: input.exposure.localWsUrl,
     httpBaseUrl: new URL(input.exposure.localHttpUrl),
@@ -367,6 +374,7 @@ function resolveRuntimeState(input: {
   readonly requestedMode: DesktopServerExposureMode;
   readonly settings: DesktopAppSettings.DesktopSettings;
   readonly port: number;
+  readonly attachExisting: boolean;
   readonly networkInterfaces: DesktopNetworkInterfaces.NetworkInterfaces;
   readonly advertisedHostOverride: Option.Option<string>;
 }): ResolvedRuntimeState {
@@ -401,6 +409,7 @@ function resolveRuntimeState(input: {
       settings: input.settings,
       exposure,
       port: input.port,
+      attachExisting: input.attachExisting,
     }),
     unavailable,
   };
@@ -409,7 +418,8 @@ function resolveRuntimeState(input: {
 const requiresBackendRelaunch = (previous: RuntimeState, next: RuntimeState): boolean =>
   previous.port !== next.port ||
   previous.bindHost !== next.bindHost ||
-  previous.localHttpUrl !== next.localHttpUrl;
+  previous.localHttpUrl !== next.localHttpUrl ||
+  previous.attachExisting !== next.attachExisting;
 
 export const make = Effect.gen(function* () {
   const config = yield* DesktopConfig.DesktopConfig;
@@ -437,7 +447,13 @@ export const make = Effect.gen(function* () {
   const backendConfig = Ref.get(stateRef).pipe(Effect.map(toBackendConfig));
 
   const configureFromSettings = Effect.fn("desktop.serverExposure.configureFromSettings")(
-    function* ({ port }: { readonly port: number }) {
+    function* ({
+      port,
+      attachExisting = false,
+    }: {
+      readonly port: number;
+      readonly attachExisting?: boolean;
+    }) {
       yield* Effect.annotateCurrentSpan({ port });
       const settings = yield* desktopSettings.get;
       const currentNetworkInterfaces = yield* readNetworkInterfaces;
@@ -445,6 +461,7 @@ export const make = Effect.gen(function* () {
         requestedMode: settings.serverExposureMode,
         settings,
         port,
+        attachExisting,
         networkInterfaces: currentNetworkInterfaces,
         advertisedHostOverride: config.desktopLanHostOverride,
       });
@@ -468,6 +485,7 @@ export const make = Effect.gen(function* () {
       requestedMode: mode,
       settings: nextSettings,
       port: previous.port,
+      attachExisting: previous.attachExisting,
       networkInterfaces: currentNetworkInterfaces,
       advertisedHostOverride: config.desktopLanHostOverride,
     });

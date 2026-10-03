@@ -174,6 +174,11 @@ export const ComposerStashMenu = memo(function ComposerStashMenu(props: {
                   </button>
                 </ComposerBanner.Content>
                 <ComposerBanner.Actions>
+                  {entry.queueTarget ? (
+                    <span className="shrink-0 rounded-full border border-border/70 px-1.5 py-0.5 text-[10px] font-medium text-foreground/70">
+                      Queued
+                    </span>
+                  ) : null}
                   {entry.pendingImageCount ? (
                     <span className="shrink-0 text-muted-foreground">
                       saving {entry.pendingImageCount} image

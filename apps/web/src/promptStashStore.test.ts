@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vite-plus/test";
-import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, MessageId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import {
   collectAssistantCitations,
   serializeAssistantCitation,
@@ -249,6 +249,32 @@ describe("promptStashStore", () => {
     });
 
     expect(usePromptStashStore.getState().entries[0]?.files).toEqual([file]);
+  });
+
+  it("round-trips targeted queue metadata through persisted stash decoding", () => {
+    const queueTarget = {
+      environmentId: EnvironmentId.make("environment-1"),
+      threadId: ThreadId.make("thread-1"),
+      modelSelection: {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5-codex",
+      },
+      runtimeMode: "full-access" as const,
+      interactionMode: "default" as const,
+    };
+    const entry = { ...makeEntry({ id: "queued" }), queueTarget };
+
+    usePromptStashStore.getState().stashEntry(entry);
+    expect(usePromptStashStore.getState().entries[0]?.queueTarget).toEqual(queueTarget);
+
+    writePromptStashStorageForTest(
+      JSON.stringify({
+        version: 2,
+        state: { entries: [entry] },
+      }),
+    );
+
+    expect(usePromptStashStore.getState().entries[0]?.queueTarget).toEqual(queueTarget);
   });
 
   it("finalizeEntryImages reports false when the entry was already taken", () => {

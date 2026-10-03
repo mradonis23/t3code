@@ -83,9 +83,15 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions) {
       const result = await options.storage.load();
       const current = currentMessages();
       const currentIds = new Set(current.map((message) => message.messageId));
-      const recovered = result.messages.filter(
-        (message) => !currentIds.has(message.messageId) && !revisions.has(message.messageId),
-      );
+      const recovered = result.messages
+        .map((message) =>
+          message.creation === undefined && message.deliveryMode === "steer"
+            ? { ...message, deliveryMode: "paused" as const }
+            : message,
+        )
+        .filter(
+          (message) => !currentIds.has(message.messageId) && !revisions.has(message.messageId),
+        );
       // Accepted edits and removals win over a later disk read. Retaining
       // current objects also keeps retries from restarting the drain.
       if (recovered.length > 0) setMessages([...recovered, ...current]);

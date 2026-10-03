@@ -1034,27 +1034,59 @@ describe("EnvironmentSupervisor", () => {
     }).pipe(Effect.provide(TestClock.layer())),
   );
 
-  it.effect("uses the full tolerance window for a stalled desktop foreground probe", () =>
+  it.effect("retains the session when an Android foreground probe responds after ten seconds", () =>
     Effect.gen(function* () {
+      const probeStarted = yield* Deferred.make<void>();
+      const probeResponse = yield* Deferred.make<void>();
+      const probeCompleted = yield* Deferred.make<void>();
       const harness = yield* makeHarness({
-        probe: (attempt) => (attempt === 1 ? Effect.never : Effect.void),
+        probe: () =>
+          Deferred.succeed(probeStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(probeResponse)),
+            Effect.andThen(Deferred.succeed(probeCompleted, undefined)),
+            Effect.asVoid,
+          ),
       });
       const supervisor = yield* EnvironmentSupervisor.make(TARGET_ENTRY, {
         initiallyDesired: true,
       }).pipe(Effect.provide(harness.dependencies));
-
       yield* awaitState(supervisor.state, (state) => state.phase === "connected");
       yield* harness.wake("application-active");
-      yield* TestClock.adjust("14999 millis");
+      yield* Deferred.await(probeStarted);
+      yield* TestClock.adjust("10 seconds");
+      expect(yield* Ref.get(harness.releaseCount)).toBe(0);
+      yield* Deferred.succeed(probeResponse, undefined);
+      yield* Deferred.await(probeCompleted);
+      yield* TestClock.adjust("6 seconds");
       expect(yield* Ref.get(harness.sessionCount)).toBe(1);
-      yield* TestClock.adjust("1 milli");
-      yield* awaitState(
-        supervisor.state,
-        (state) => state.phase === "connected" && state.generation === 2 && state.attempt === 1,
-      );
-
-      expect(yield* Ref.get(harness.sessionCount)).toBe(2);
+      expect(yield* Ref.get(harness.releaseCount)).toBe(0);
+      expect((yield* SubscriptionRef.get(supervisor.state)).phase).toBe("connected");
     }).pipe(Effect.provide(TestClock.layer())),
+  );
+
+  it.effect(
+    "uses the full tolerance window for a stalled desktop or Android foreground probe",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* makeHarness({
+          probe: (attempt) => (attempt === 1 ? Effect.never : Effect.void),
+        });
+        const supervisor = yield* EnvironmentSupervisor.make(TARGET_ENTRY, {
+          initiallyDesired: true,
+        }).pipe(Effect.provide(harness.dependencies));
+
+        yield* awaitState(supervisor.state, (state) => state.phase === "connected");
+        yield* harness.wake("application-active");
+        yield* TestClock.adjust("14999 millis");
+        expect(yield* Ref.get(harness.sessionCount)).toBe(1);
+        yield* TestClock.adjust("1 milli");
+        yield* awaitState(
+          supervisor.state,
+          (state) => state.phase === "connected" && state.generation === 2 && state.attempt === 1,
+        );
+
+        expect(yield* Ref.get(harness.sessionCount)).toBe(2);
+      }).pipe(Effect.provide(TestClock.layer())),
   );
 
   it.effect("quickly times out a stalled mobile foreground liveness probe", () =>

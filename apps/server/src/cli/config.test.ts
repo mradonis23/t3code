@@ -136,7 +136,10 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         devAllowedOrigins: ["https://host.example.ts.net", "https://phone.example.ts.net"],
         noBrowser: true,
         startupPresentation: "browser",
-        desktopBootstrapToken: undefined,
+        desktopBootstrapToken: resolved.desktopBootstrapToken,
+        desktopTelemetryFd: undefined,
+        desktopTelemetryControlFd: undefined,
+        resourceMonitorPath: undefined,
         autoBootstrapProjectFromCwd: false,
         logWebSocketEvents: true,
         tailscaleServeEnabled: false,
@@ -144,6 +147,48 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       });
       assert.equal(resolved.stateDir, join(baseDir, "userdata"));
     }),
+  );
+
+  it.effect(
+    "creates and reuses a persistent desktop bootstrap credential without bootstrap fd",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-desktop-bootstrap-" });
+        const input = {
+          mode: Option.some("desktop" as const),
+          port: Option.some(3773),
+          host: Option.some("127.0.0.1"),
+          baseDir: Option.some(baseDir),
+          cwd: Option.none<string>(),
+          devUrl: Option.none<URL>(),
+          noBrowser: Option.some(true),
+          bootstrapFd: Option.none<number>(),
+          autoBootstrapProjectFromCwd: Option.none<boolean>(),
+          logWebSocketEvents: Option.none<boolean>(),
+          tailscaleServeEnabled: Option.none<boolean>(),
+          tailscaleServePort: Option.none<number>(),
+        };
+
+        const resolve = () =>
+          resolveServerConfig(input, Option.none()).pipe(
+            Effect.provide(
+              Layer.mergeAll(
+                ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
+                NetService.layer,
+              ),
+            ),
+          );
+
+        const first = yield* resolve();
+        const second = yield* resolve();
+        assert.match(first.desktopBootstrapToken ?? "", /^[0-9a-f]{48}$/i);
+        assert.equal(second.desktopBootstrapToken, first.desktopBootstrapToken);
+
+        const tokenPath = path.join(baseDir, "service", "desktop-bootstrap-token");
+        assert.equal((yield* fs.readFileString(tokenPath)).trim(), first.desktopBootstrapToken);
+      }),
   );
 
   it.effect("uses CLI flags when provided", () =>
@@ -369,6 +414,7 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       assert.equal(join(baseDir, "userdata"), resolved.stateDir);
       assert.equal(resolved.desktopTelemetryFd, 4);
       assert.equal(resolved.desktopTelemetryControlFd, 5);
+      assert.equal(resolved.desktopBootstrapToken, "desktop-token");
     }),
   );
 
@@ -559,7 +605,10 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         devUrl: undefined,
         noBrowser: true,
         startupPresentation: "browser",
-        desktopBootstrapToken: undefined,
+        desktopBootstrapToken: resolved.desktopBootstrapToken,
+        desktopTelemetryFd: undefined,
+        desktopTelemetryControlFd: undefined,
+        resourceMonitorPath: undefined,
         autoBootstrapProjectFromCwd: false,
         logWebSocketEvents: false,
         tailscaleServeEnabled: false,

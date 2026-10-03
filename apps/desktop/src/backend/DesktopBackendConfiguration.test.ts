@@ -249,6 +249,57 @@ describe("DesktopBackendConfiguration", () => {
     ),
   );
 
+  it.effect("resolvePrimary uses attach mode for an externally managed desktop backend", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-desktop-backend-config-attach-",
+      });
+      const attachExposureLayer = Layer.succeed(DesktopServerExposure.DesktopServerExposure, {
+        getState: Effect.die("unexpected getState"),
+        backendConfig: Effect.succeed({
+          port: 3773,
+          bindHost: "127.0.0.1",
+          httpBaseUrl: new URL("http://127.0.0.1:3773"),
+          attachExisting: true,
+          tailscaleServeEnabled: false,
+          tailscaleServePort: 443,
+        }),
+        configureFromSettings: () => Effect.die("unexpected configureFromSettings"),
+        setMode: () => Effect.die("unexpected setMode"),
+        setTailscaleServeEnabled: () => Effect.die("unexpected setTailscaleServeEnabled"),
+        getAdvertisedEndpoints: Effect.succeed([]),
+      } satisfies DesktopServerExposure.DesktopServerExposure["Service"]);
+
+      const serviceDir = path.join(baseDir, "service");
+      yield* fileSystem.makeDirectory(serviceDir, { recursive: true });
+      yield* fileSystem.writeFileString(
+        serviceDir + "/desktop-bootstrap-token",
+        "a".repeat(48) + "\n",
+      );
+
+      const config = yield* Effect.gen(function* () {
+        const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration;
+        return yield* configuration.resolvePrimary;
+      }).pipe(
+        Effect.provide(
+          DesktopBackendConfiguration.layer.pipe(
+            Layer.provideMerge(attachExposureLayer),
+            Layer.provideMerge(DesktopAppSettings.layerTest()),
+            Layer.provideMerge(DesktopWslEnvironment.layerTest()),
+            Layer.provideMerge(DesktopWslServerTree.layerTest()),
+            Layer.provideMerge(makeEnvironmentLayer(baseDir)),
+          ),
+        ),
+      );
+
+      assert.equal(config.launchMode, "attach");
+      assert.equal(config.httpBaseUrl.href, "http://127.0.0.1:3773/");
+      assert.equal(config.bootstrap.desktopBootstrapToken, "a".repeat(48));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("resolvePrimary starts from server.asar without materializing the WSL tree", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

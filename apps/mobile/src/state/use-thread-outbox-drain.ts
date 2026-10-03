@@ -40,6 +40,7 @@ import {
   resolveThreadOutboxFailureAction,
   resolveQueuedThreadSettings,
   shouldRetryThreadOutboxDelivery,
+  successfulQueuedTurnCompletion,
   threadOutboxRetryDelayMs,
   type QueuedThreadCreation,
   type QueuedThreadMessage,
@@ -518,12 +519,49 @@ export function useThreadOutboxDrain(): void {
   const retryNotBeforeRef = useRef(new Map<MessageId, number>());
   const retryTimersRef = useRef(new Map<MessageId, ReturnType<typeof setTimeout>>());
   const acknowledgedExistingThreadMessageIdsRef = useRef(new Set<MessageId>());
+  const previousLatestTurnByThreadKeyRef = useRef(
+    new Map<string, EnvironmentThreadShell["latestTurn"]>(),
+  );
+  const successfulCompletionByThreadKeyRef = useRef(new Map<string, string>());
+  const pausedMessagesRef = useRef(new Map<MessageId, QueuedThreadMessage>());
   const blockedRecoverySubscriptionsRef = useRef(
     new Map<
       MessageId,
       { readonly message: QueuedThreadMessage; readonly unsubscribe: () => void }
     >(),
   );
+
+  // Queue progression is armed only by a completion transition observed in
+  // this runtime. Hydrating an already-completed thread after restart is
+  // intentionally not enough evidence to replay a persisted prompt.
+  useEffect(() => {
+    const previousTurns = previousLatestTurnByThreadKeyRef.current;
+    const liveThreadKeys = new Set<string>();
+    for (const thread of threads) {
+      const threadKey = scopedThreadKey(thread.environmentId, thread.id);
+      liveThreadKeys.add(threadKey);
+      const connected = connectedEnvironments.some(
+        (environment) =>
+          environment.environmentId === thread.environmentId &&
+          environment.connectionState === "connected",
+      );
+      if (!connected) {
+        previousTurns.delete(threadKey);
+        successfulCompletionByThreadKeyRef.current.delete(threadKey);
+        continue;
+      }
+      const previous = previousTurns.get(threadKey);
+      const latest = thread.latestTurn;
+      const completedTurnId = successfulQueuedTurnCompletion(previous, latest);
+      if (completedTurnId !== null) {
+        successfulCompletionByThreadKeyRef.current.set(threadKey, completedTurnId);
+      }
+      previousTurns.set(threadKey, latest);
+    }
+    for (const threadKey of previousTurns.keys()) {
+      if (!liveThreadKeys.has(threadKey)) previousTurns.delete(threadKey);
+    }
+  }, [connectedEnvironments, threads]);
 
   const scheduleQueuedMessageRetry = useCallback((messageId: MessageId) => {
     const retryAttempt = (retryAttemptRef.current.get(messageId) ?? 0) + 1;
@@ -653,6 +691,20 @@ export function useThreadOutboxDrain(): void {
         );
       }
       const { reportFailure } = makeDeliveryHelpers(queuedMessage);
+      const pauseAfterFailure = async (message: QueuedThreadMessage) => {
+        pausedMessagesRef.current.set(message.messageId, message);
+        if (message.deliveryMode === "steer") {
+          const paused = { ...message, deliveryMode: "paused" as const };
+          try {
+            await updateThreadOutboxMessage(paused);
+            pausedMessagesRef.current.set(message.messageId, paused);
+          } catch (error) {
+            console.warn("[thread-outbox] failed to persist paused queued message", error);
+          }
+        }
+        return true;
+      };
+      const preservesQueueOnFailure = queuedMessage.deliveryMode !== "immediate";
 
       if (!modelSelectionsEqual(settings.modelSelection, thread.modelSelection)) {
         const updateResult = await updateThreadMetadata({
@@ -665,7 +717,7 @@ export function useThreadOutboxDrain(): void {
         });
         if (AsyncResult.isFailure(updateResult)) {
           reportFailure(updateResult, "settings-sync");
-          return false;
+          return preservesQueueOnFailure ? pauseAfterFailure(queuedMessage) : false;
         }
       }
 
@@ -681,7 +733,7 @@ export function useThreadOutboxDrain(): void {
         });
         if (AsyncResult.isFailure(runtimeResult)) {
           reportFailure(runtimeResult, "settings-sync");
-          return false;
+          return preservesQueueOnFailure ? pauseAfterFailure(queuedMessage) : false;
         }
       }
 
@@ -697,7 +749,7 @@ export function useThreadOutboxDrain(): void {
         });
         if (AsyncResult.isFailure(interactionResult)) {
           reportFailure(interactionResult, "settings-sync");
-          return false;
+          return preservesQueueOnFailure ? pauseAfterFailure(queuedMessage) : false;
         }
       }
 
@@ -724,6 +776,9 @@ export function useThreadOutboxDrain(): void {
         }
       } catch (error) {
         console.warn("[thread-outbox] failed to upload attachments", error);
+        if (preservesQueueOnFailure) {
+          return pauseAfterFailure(queuedMessage);
+        }
         if (!shouldRetryThreadOutboxDelivery(error)) {
           return restoreQueuedMessage(
             queuedMessage,
@@ -768,6 +823,9 @@ export function useThreadOutboxDrain(): void {
         },
       });
       const failure = reportFailure(deliveryResult, "start-turn");
+      if (failure && preservesQueueOnFailure) {
+        return pauseAfterFailure(persistedMessage);
+      }
       if (failure?.action === "retry") {
         return false;
       }
@@ -931,6 +989,12 @@ export function useThreadOutboxDrain(): void {
         acknowledgedExistingThreadMessageIdsRef.current.delete(messageId);
       }
     }
+    for (const [messageId, pausedMessage] of pausedMessagesRef.current) {
+      const current = Object.values(queuedMessagesByThreadKey)
+        .flat()
+        .find((message) => message.messageId === messageId);
+      if (current !== pausedMessage) pausedMessagesRef.current.delete(messageId);
+    }
 
     for (const [threadKey, queuedMessages] of Object.entries(queuedMessagesByThreadKey)) {
       const nextQueuedMessage = queuedMessages[0];
@@ -968,6 +1032,9 @@ export function useThreadOutboxDrain(): void {
       if (editingQueuedMessageIds[nextQueuedMessage.messageId]) {
         continue;
       }
+      if (pausedMessagesRef.current.get(nextQueuedMessage.messageId) === nextQueuedMessage) {
+        continue;
+      }
       const blockedRecovery = blockedRecoverySubscriptionsRef.current.get(
         nextQueuedMessage.messageId,
       );
@@ -998,6 +1065,10 @@ export function useThreadOutboxDrain(): void {
         shellStatus,
         environmentConnected: environment?.connectionState === "connected",
         threadBusy: thread?.session?.status === "running" || thread?.session?.status === "starting",
+        deliveryMode: nextQueuedMessage.deliveryMode,
+        successfulCompletionAvailable:
+          thread?.latestTurn?.state === "completed" &&
+          successfulCompletionByThreadKeyRef.current.get(threadKey) === thread.latestTurn.turnId,
       });
       // The delivery action resolves first; capability checks apply only to
       // a message that will send. Checking earlier would restore a
@@ -1066,7 +1137,11 @@ export function useThreadOutboxDrain(): void {
         }
       }
 
+      const dispatchCompletionTurnId = successfulCompletionByThreadKeyRef.current.get(threadKey);
       beginDispatchingQueuedMessage(nextQueuedMessage.messageId);
+      if (nextQueuedMessage.deliveryMode === "after-success") {
+        successfulCompletionByThreadKeyRef.current.delete(threadKey);
+      }
       const removeQueuedMessage = (warning: string) =>
         removeThreadOutboxMessage(nextQueuedMessage).then(
           () => true,
@@ -1097,7 +1172,7 @@ export function useThreadOutboxDrain(): void {
         }
         // The shell state is equally stale. Re-run the same delivery policy
         // against the live thread snapshot so a vanished thread or newly
-        // created target defers, while busy existing threads can still steer.
+        // created target defers.
         if (deliveryAction === "send") {
           const liveThread = findThread(
             appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
@@ -1111,6 +1186,11 @@ export function useThreadOutboxDrain(): void {
             shellStatus,
             environmentConnected: environment?.connectionState === "connected",
             threadBusy: liveThreadBusy,
+            deliveryMode: nextQueuedMessage.deliveryMode,
+            successfulCompletionAvailable:
+              nextQueuedMessage.deliveryMode === "after-success" &&
+              liveThread?.latestTurn?.state === "completed" &&
+              liveThread.latestTurn.turnId === dispatchCompletionTurnId,
           });
           if (liveDeliveryAction !== "send") {
             return true;

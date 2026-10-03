@@ -132,12 +132,13 @@ describe("ComposerPrimaryActions", () => {
     expect(markup).not.toContain('aria-label="Send message"');
   });
 
-  it("renders send alongside stop while running when Enter-to-send is unavailable", () => {
+  it("renders explicit Queue and Steer alongside stop while a running turn has content", () => {
     const markup = renderRunningActions(true, true);
 
     expect(markup).toContain('aria-label="Stop generation"');
-    expect(markup).toContain('aria-label="Send message"');
-    expect(markup).toContain('type="submit"');
+    expect(markup).toContain(">Queue</button>");
+    expect(markup).toContain(">Steer</button>");
+    expect(markup).not.toContain('aria-label="Send message"');
   });
 
   it("keeps stop as the only action while running with an empty composer", () => {

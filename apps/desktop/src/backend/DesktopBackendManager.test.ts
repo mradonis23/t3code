@@ -274,6 +274,54 @@ describe("DesktopBackendManager", () => {
     ),
   );
 
+  it.effect("attaches to a healthy managed backend without spawning or killing a child", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        let spawnCount = 0;
+        let readyCount = 0;
+        let shutdownCount = 0;
+        const spawnerLayer = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() => {
+            spawnCount += 1;
+            return Effect.die("attach mode must not spawn a backend child");
+          }),
+        );
+        const attachConfig: DesktopBackendManager.DesktopBackendStartConfig = {
+          ...baseConfig,
+          launchMode: "attach",
+        };
+        const instance = yield* makeTestInstance({
+          config: attachConfig,
+          spawnerLayer,
+          onReady: Effect.sync(() => {
+            readyCount += 1;
+          }),
+          onShutdown: Effect.sync(() => {
+            shutdownCount += 1;
+          }),
+        });
+
+        yield* instance.start;
+        const running = yield* instance.snapshot;
+        assert.equal(spawnCount, 0);
+        assert.equal(readyCount, 1);
+        assert.equal(running.desiredRunning, true);
+        assert.equal(running.ready, true);
+        assert.isTrue(Option.isNone(running.activePid));
+        assert.deepEqual(yield* instance.currentConfig, Option.some(attachConfig));
+
+        yield* instance.stop();
+        const stopped = yield* instance.snapshot;
+        assert.equal(spawnCount, 0);
+        assert.equal(shutdownCount, 1);
+        assert.equal(stopped.desiredRunning, false);
+        assert.equal(stopped.ready, false);
+        assert.isTrue(Option.isNone(stopped.activePid));
+      }),
+    ),
+  );
+
   it.effect("preserves the readiness timeout cause and process context", () =>
     Effect.gen(function* () {
       const requested = yield* Deferred.make<HttpClientRequest.HttpClientRequest>();

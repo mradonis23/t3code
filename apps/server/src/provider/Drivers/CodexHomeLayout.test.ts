@@ -10,6 +10,7 @@ import { CodexSettings } from "@t3tools/contracts";
 import {
   CodexShadowHomeEntryConflictError,
   CodexShadowHomePathConflictError,
+  CodexShadowHomePrivateEntrySymlinkError,
   materializeCodexShadowHome,
   resolveCodexHomeLayout,
 } from "./CodexHomeLayout.ts";
@@ -85,6 +86,124 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
   });
 
   describe("materializeCodexShadowHome", () => {
+    it.effect.skipIf(!symlinksSupported)(
+      "guards unrelated SQLite files and rejects shared authentication links",
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          for (const name of [
+            "other_1.sqlite",
+            "state_backup.sqlite",
+            "goals_1.sqlite.bak",
+            "auth.json",
+          ]) {
+            const sharedHome = yield* makeTempDir("t3code-codex-shared-");
+            const shadowHome = yield* makeTempDir("t3code-codex-shadow-");
+            yield* writeTextFile(path.join(sharedHome, name), "shared");
+            if (name === "auth.json") {
+              yield* fs.symlink(path.join(sharedHome, name), path.join(shadowHome, name));
+            } else {
+              yield* writeTextFile(path.join(shadowHome, name), "local");
+            }
+            const layout = yield* resolveCodexHomeLayout(
+              decodeCodexSettings({
+                homePath: sharedHome,
+                shadowHomePath: shadowHome,
+              }),
+            );
+            const error = yield* materializeCodexShadowHome(layout).pipe(Effect.flip);
+            expect(error).toBeInstanceOf(
+              name === "auth.json"
+                ? CodexShadowHomePrivateEntrySymlinkError
+                : CodexShadowHomeEntryConflictError,
+            );
+            expect(yield* fs.readFileString(path.join(sharedHome, name))).toBe("shared");
+            expect(yield* fs.readFileString(path.join(shadowHome, name))).toBe(
+              name === "auth.json" ? "shared" : "local",
+            );
+          }
+        }),
+    );
+
+    it.effect.skipIf(!symlinksSupported)(
+      "keeps versioned runtime databases local across repeated shadow hydration",
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const sharedHome = yield* makeTempDir("t3code-codex-shared-");
+          const shadowHome = yield* makeTempDir("t3code-codex-shadow-");
+          const names = ["goals", "logs", "memories", "queue", "state", "thread_history"].flatMap(
+            (name) =>
+              ["", "_1", "_12"].flatMap((version) =>
+                ["", "-shm", "-wal"].map((suffix) => `${name}${version}.sqlite${suffix}`),
+              ),
+          );
+          for (const name of names) {
+            yield* writeTextFile(path.join(sharedHome, name), "shared");
+            yield* writeTextFile(path.join(shadowHome, name), "local");
+          }
+          for (const name of ["auth.json", "models_cache.json"]) {
+            yield* writeTextFile(path.join(sharedHome, name), "shared-private");
+            yield* writeTextFile(path.join(shadowHome, name), "shadow-private");
+          }
+          const layout = yield* resolveCodexHomeLayout(
+            decodeCodexSettings({
+              homePath: sharedHome,
+              shadowHomePath: shadowHome,
+            }),
+          );
+          yield* materializeCodexShadowHome(layout);
+          yield* materializeCodexShadowHome(layout);
+          for (const name of names) {
+            expect(yield* fs.readFileString(path.join(shadowHome, name))).toBe("local");
+            expect(yield* fs.readFileString(path.join(sharedHome, name))).toBe("shared");
+            expect((yield* fs.readLink(path.join(shadowHome, name)).pipe(Effect.result))._tag).toBe(
+              "Failure",
+            );
+          }
+          for (const name of ["auth.json", "models_cache.json"]) {
+            expect(yield* fs.readFileString(path.join(shadowHome, name))).toBe("shadow-private");
+          }
+        }),
+    );
+
+    it.effect.skipIf(!symlinksSupported)(
+      "unlinks old runtime database overlays without touching shared files or recreating links",
+      () =>
+        Effect.gen(function* () {
+          const fs = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const sharedHome = yield* makeTempDir("t3code-codex-shared-");
+          const shadowHome = yield* makeTempDir("t3code-codex-shadow-");
+          const names = ["goals_1.sqlite", "state_5.sqlite-wal", "logs_2.sqlite-shm"];
+          for (const name of names) {
+            yield* writeTextFile(path.join(sharedHome, name), "shared");
+            yield* fs.symlink(path.join(sharedHome, name), path.join(shadowHome, name));
+          }
+          yield* writeTextFile(path.join(sharedHome, "queue_4.sqlite"), "shared-only");
+          yield* fs.symlink(
+            path.join(sharedHome, "missing.sqlite"),
+            path.join(shadowHome, "thread_history_9.sqlite-wal"),
+          );
+          const layout = yield* resolveCodexHomeLayout(
+            decodeCodexSettings({
+              homePath: sharedHome,
+              shadowHomePath: shadowHome,
+            }),
+          );
+          yield* materializeCodexShadowHome(layout);
+          yield* materializeCodexShadowHome(layout);
+          for (const name of names) {
+            expect(yield* fs.exists(path.join(shadowHome, name))).toBe(false);
+            expect(yield* fs.readFileString(path.join(sharedHome, name))).toBe("shared");
+          }
+          expect(yield* fs.exists(path.join(shadowHome, "queue_4.sqlite"))).toBe(false);
+          expect(yield* fs.readDirectory(shadowHome)).not.toContain("thread_history_9.sqlite-wal");
+        }),
+    );
+
     it.effect.skipIf(!symlinksSupported)(
       "materializes a shadow home with shared state links and private auth",
       () =>

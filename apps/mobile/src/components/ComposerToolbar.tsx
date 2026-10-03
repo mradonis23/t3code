@@ -221,6 +221,7 @@ export function ComposerActionButton(props: {
   readonly accessibilityLabel: string;
   readonly disabled?: boolean;
   readonly icon: ComponentProps<typeof SymbolView>["name"];
+  readonly label?: string;
   readonly onPress: () => void;
   readonly variant?: "primary" | "danger";
 }) {
@@ -229,13 +230,17 @@ export function ComposerActionButton(props: {
       accessibilityLabel={props.accessibilityLabel}
       accessibilityRole="button"
       accessibilityState={{ disabled: props.disabled }}
-      className="size-[44px] shrink-0 items-center justify-center active:opacity-70"
+      className={cn(
+        "h-[44px] shrink-0 items-center justify-center active:opacity-70",
+        props.label ? "px-1" : "w-[44px]",
+      )}
       disabled={props.disabled}
       onPress={props.onPress}
     >
       <View
         className={cn(
-          "size-[30px] items-center justify-center rounded-full",
+          "h-[30px] flex-row items-center justify-center gap-1 rounded-full",
+          props.label ? "px-2.5" : "w-[30px]",
           props.variant === "danger"
             ? "bg-danger"
             : props.disabled
@@ -252,6 +257,9 @@ export function ComposerActionButton(props: {
           }
           type="monochrome"
         />
+        {props.label ? (
+          <Text className="text-xs font-t3-bold text-primary-foreground">{props.label}</Text>
+        ) : null}
       </View>
     </Pressable>
   );

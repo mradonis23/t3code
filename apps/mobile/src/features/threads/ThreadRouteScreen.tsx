@@ -73,6 +73,7 @@ import { useSelectedThreadWorktree } from "../../state/use-selected-thread-workt
 import { useThreadComposerState } from "../../state/use-thread-composer-state";
 import { threadEnvironment } from "../../state/threads";
 import { projectThreadContentPresentation } from "./threadContentPresentation";
+import { buildCheckpointContinuation } from "./checkpointContinuation.logic";
 import {
   useAdaptiveWorkspaceLayout,
   useAdaptiveWorkspacePaneRole,
@@ -322,6 +323,25 @@ function ThreadRouteContent(
           input: { cwd: selectedThreadCwd },
         })
       : null,
+  );
+  const checkpointContinuation = useMemo(
+    () =>
+      selectedThreadDetail
+        ? buildCheckpointContinuation({
+            thread: selectedThreadDetail,
+            connectionState: routeConnectionState,
+            gitStatus: gitStatus.data ?? null,
+            projectTitle: selectedThreadProject?.title ?? null,
+            projectWorkspaceRoot: selectedThreadProject?.workspaceRoot ?? null,
+          })
+        : null,
+    [
+      gitStatus.data,
+      routeConnectionState,
+      selectedThreadDetail,
+      selectedThreadProject?.title,
+      selectedThreadProject?.workspaceRoot,
+    ],
   );
   const knownTerminalSessions = useKnownTerminalSessions({
     environmentId: selectedThread?.environmentId ?? null,
@@ -805,6 +825,7 @@ function ThreadRouteContent(
           projectWorkspaceRoot={selectedThreadProject?.workspaceRoot ?? null}
           threadCwd={selectedThreadCwd}
           selectedThreadQueueCount={composer.selectedThreadQueueCount}
+          checkpointContinuation={checkpointContinuation}
           layoutVariant={layout.variant}
           usesAutomaticContentInsets={usesNativeHeaderGlass}
           onOpenConnectionEditor={handleOpenConnectionEditor}
@@ -816,6 +837,7 @@ function ThreadRouteContent(
           serverConfig={serverConfig}
           onStopThread={handleStopThread}
           onSendMessage={composer.onSendMessage}
+          onQueueCheckpointContinuation={composer.onQueueCheckpointContinuation}
           onReconnectEnvironment={handleReconnectEnvironment}
           onUpdateThreadModelSelection={composer.onUpdateModelSelection}
           onUpdateThreadRuntimeMode={composer.onUpdateRuntimeMode}

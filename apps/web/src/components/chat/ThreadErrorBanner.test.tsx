@@ -69,6 +69,19 @@ describe("ThreadErrorBanner", () => {
   it("never shows a null error", () => {
     expect(shouldShowThreadErrorBanner("env:thread-e", null, false)).toBe(false);
   });
+  it("offers Continue from checkpoint when recovery is available", () => {
+    const markup = renderToStaticMarkup(
+      <ThreadErrorBanner
+        error="Provider session did not survive a server restart."
+        onContinue={() => {}}
+        onDismiss={() => {}}
+      />,
+    );
+
+    expect(markup).toContain("Continue from checkpoint");
+    expect(markup).toContain('aria-label="Dismiss error"');
+  });
+
   it("aligns the warning and dismiss icons with the first line of a multi-line error", () => {
     const markup = renderToStaticMarkup(
       <ThreadErrorBanner

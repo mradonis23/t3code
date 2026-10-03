@@ -758,6 +758,18 @@ describe("isRecoverableThreadResumeError", () => {
     );
   });
 
+  it("treats an existing active writer as a hard ownership conflict", () => {
+    NodeAssert.equal(
+      isRecoverableThreadResumeError(
+        new CodexErrors.CodexAppServerRequestError({
+          code: -32603,
+          errorMessage: "thread 01a0ff64-7c13-7533-bc72-17008c182a12 already has an active writer",
+        }),
+      ),
+      false,
+    );
+  });
+
   it("ignores unrelated missing-resource errors that do not mention threads", () => {
     NodeAssert.equal(
       isRecoverableThreadResumeError(

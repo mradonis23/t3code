@@ -1,3 +1,10 @@
+import {
+  EnvironmentId,
+  ModelSelection,
+  ProviderInteractionMode,
+  RuntimeMode,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { create } from "zustand";
 
@@ -33,10 +40,19 @@ export const MAX_STASH_ENTRY_ATTACHMENT_CHARS = 2_700_000;
  * Stashed files keep signed-upload references instead of storing their bytes.
  * Image payloads remain subject to the localStorage budget.
  */
+const PromptQueueTargetSchema = Schema.Struct({
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+});
+
 const StashEntrySchema = Schema.Struct({
   id: Schema.String,
   createdAt: Schema.String,
   prompt: Schema.String,
+  queueTarget: Schema.optionalKey(PromptQueueTargetSchema),
   attachments: Schema.Array(PersistedComposerImageAttachment),
   files: Schema.optionalKey(Schema.Array(PersistedComposerFileAttachment)),
   /** Names of images that exceeded the attachment budget and were not saved. */

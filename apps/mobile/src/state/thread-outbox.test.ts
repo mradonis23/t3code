@@ -73,6 +73,7 @@ import {
   groupQueuedThreadMessages,
   isQueuedThreadCreationSendable,
   modelSelectionsEqual,
+  resolveComposerDeliveryMode,
   resolveThreadOutboxDeliveryAction,
   resolveThreadOutboxDispatchStep,
   resolveThreadOutboxFailureAction,
@@ -107,6 +108,21 @@ function queuedMessage(input: {
 }
 
 describe("thread outbox", () => {
+  it("uses immediate delivery while idle, queues while busy, and steers only explicitly", () => {
+    expect(
+      resolveComposerDeliveryMode({ intent: "default", connected: true, threadBusy: false }),
+    ).toBe("immediate");
+    expect(
+      resolveComposerDeliveryMode({ intent: "default", connected: true, threadBusy: true }),
+    ).toBe("after-success");
+    expect(
+      resolveComposerDeliveryMode({ intent: "steer", connected: true, threadBusy: true }),
+    ).toBe("steer");
+    expect(
+      resolveComposerDeliveryMode({ intent: "default", connected: false, threadBusy: false }),
+    ).toBe("after-success");
+  });
+
   it.each(["read", "json", "schema"] as const)(
     "recovers usable messages without permitting cleanup after a record %s failure",
     async (failure) => {
@@ -1282,11 +1298,12 @@ describe("thread outbox", () => {
         shellStatus: "live",
         environmentConnected: true,
         threadBusy: false,
+        deliveryMode: "immediate",
       }),
     ).toBe("send");
   });
 
-  it("sends existing-thread messages whenever connected so queued messages can steer", () => {
+  it("holds queued messages until successful completion and sends explicit steer immediately", () => {
     expect(
       resolveThreadOutboxDeliveryAction({
         isCreation: false,
@@ -1294,6 +1311,29 @@ describe("thread outbox", () => {
         shellStatus: "live",
         environmentConnected: true,
         threadBusy: true,
+        deliveryMode: "after-success",
+        successfulCompletionAvailable: false,
+      }),
+    ).toBe("wait");
+    expect(
+      resolveThreadOutboxDeliveryAction({
+        isCreation: false,
+        threadExists: true,
+        shellStatus: "live",
+        environmentConnected: true,
+        threadBusy: false,
+        deliveryMode: "after-success",
+        successfulCompletionAvailable: true,
+      }),
+    ).toBe("send");
+    expect(
+      resolveThreadOutboxDeliveryAction({
+        isCreation: false,
+        threadExists: true,
+        shellStatus: "live",
+        environmentConnected: true,
+        threadBusy: true,
+        deliveryMode: "steer",
       }),
     ).toBe("send");
     expect(
@@ -1303,6 +1343,7 @@ describe("thread outbox", () => {
         shellStatus: "live",
         environmentConnected: false,
         threadBusy: true,
+        deliveryMode: "steer",
       }),
     ).toBe("wait");
   });

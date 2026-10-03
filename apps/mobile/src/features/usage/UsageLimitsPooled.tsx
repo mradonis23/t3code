@@ -162,6 +162,11 @@ function PoolWindowCard({
               >
                 {accountName(account)}
               </Text>
+              {account.enabled !== null ? (
+                <Text className="text-xs text-foreground-muted">
+                  {account.enabled ? "Enabled" : "Disabled"}
+                </Text>
+              ) : null}
               <Text className="text-sm font-t3-medium tabular-nums text-foreground">
                 {remainingPercent(window)}%
               </Text>

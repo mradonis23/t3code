@@ -86,6 +86,7 @@ export interface BackendProcessContext {
 export type DesktopBackendBootstrapDelivery = "fd3" | "stdin";
 
 export interface DesktopBackendStartConfig extends BackendProcessContext {
+  readonly launchMode?: "spawn" | "attach";
   readonly args: ReadonlyArray<string>;
   readonly env: Record<string, string | undefined>;
   // When true the spawner merges the desktop process.env on top of `env`;
@@ -722,9 +723,12 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
           }
           return;
         }
-        const entryExists = yield* fileSystem
-          .exists(config.value.entryPath)
-          .pipe(Effect.orElseSucceed(() => false));
+        const entryExists =
+          config.value.launchMode === "attach"
+            ? true
+            : yield* fileSystem
+                .exists(config.value.entryPath)
+                .pipe(Effect.orElseSucceed(() => false));
 
         const resetFatalPreflightCounter =
           !current.desiredRunning && current.preflightFailureAttempt > 0;
@@ -825,6 +829,41 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
             nextRunId: latest.nextRunId + 1,
           },
         ]);
+
+        if (config.value.launchMode === "attach") {
+          const readiness = yield* waitForHttpReady({
+            ...config.value,
+            timeout: Duration.seconds(5),
+          }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient), Effect.exit);
+          if (Exit.isFailure(readiness)) {
+            yield* Scope.close(runScope, Exit.void).pipe(Effect.ignore);
+            yield* Ref.update(state, (latest) => {
+              const activeRun = Option.getOrUndefined(latest.active);
+              return activeRun?.id === runId
+                ? { ...latest, active: Option.none(), ready: false }
+                : latest;
+            });
+            yield* scheduleRestart("managed desktop backend readiness failed");
+            return;
+          }
+
+          const isCurrentRun = yield* Ref.modify(state, (latest) => {
+            const activeRun = Option.getOrUndefined(latest.active);
+            if (activeRun?.id !== runId) return [false, latest] as const;
+            return [
+              true,
+              {
+                ...latest,
+                restartAttempt: 0,
+                ready: true,
+              },
+            ] as const;
+          });
+          if (isCurrentRun) {
+            yield* spec.onReady?.(config.value.httpBaseUrl) ?? Effect.void;
+          }
+          return;
+        }
 
         const finalizeRun = Effect.fn("desktop.backendInstance.finalizeRun")(function* (
           reason: string,

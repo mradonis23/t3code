@@ -10,7 +10,6 @@ import {
   type UsageLimitsReport,
   type ProviderInstanceId,
   type ServerProviderSlashCommand,
-  isProviderAvailable,
   type ServerProvider,
   type ServerProviderUsageLimits,
   type ServerProviderUsageWindow,
@@ -25,20 +24,13 @@ const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 
 /**
- * Providers that belong on the Limits view: enabled, installed, and one whose
- * driver reports subscription usage at all. A driver with no notion of usage
- * never sets `usageLimits`, so it has no row rather than an empty one.
+ * Keep reported telemetry visible even when an instance is disabled or its
+ * runtime is temporarily unavailable. Availability controls sending, not quota.
  */
 export function providersWithLimits(
   providers: readonly ServerProvider[],
 ): readonly ServerProvider[] {
-  return providers.filter(
-    (provider) =>
-      provider.enabled &&
-      provider.installed &&
-      isProviderAvailable(provider) &&
-      provider.usageLimits !== undefined,
-  );
+  return providers.filter((provider) => provider.usageLimits !== undefined);
 }
 
 export interface LimitsGroup {
@@ -160,6 +152,8 @@ export interface LimitAccount {
   readonly driver: ServerProvider["driver"];
   /** The instance's configured name, which is not sensitive; null for hub accounts. */
   readonly displayName: string | null;
+  /** Null for hub-only accounts; true if any native instance is enabled. */
+  readonly enabled: boolean | null;
   readonly email: string | undefined;
   readonly plan: string | undefined;
   readonly accentColor: string | undefined;
@@ -213,6 +207,7 @@ export function collectLimitAccounts(
     accounts.set(key, {
       ...previous,
       displayName: previous.displayName ?? next.displayName,
+      enabled: previous.enabled === null ? next.enabled : previous.enabled || next.enabled === true,
       plan: previous.plan ?? next.plan,
       accentColor: previous.accentColor ?? next.accentColor,
       environments,
@@ -238,6 +233,7 @@ export function collectLimitAccounts(
           key: `${environmentId}:${provider.instanceId}`,
           driver: provider.driver,
           displayName: provider.displayName?.trim() || null,
+          enabled: provider.enabled,
           email: provider.auth.email,
           plan: provider.auth.label,
           accentColor: provider.accentColor,
@@ -264,6 +260,7 @@ export function collectLimitAccounts(
           key: `${source.id}:${account.id}`,
           driver: account.driver,
           displayName: account.email ? null : account.id.replace(/\.json$/i, ""),
+          enabled: null,
           email: account.email,
           plan: account.plan,
           accentColor: undefined,

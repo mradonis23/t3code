@@ -1,5 +1,8 @@
+import { bootstrapRemoteBearerSession } from "@t3tools/client-runtime/authorization";
 import * as Cause from "effect/Cause";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -16,6 +19,7 @@ import * as DesktopAppIdentity from "./DesktopAppIdentity.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopApplicationMenu from "../window/DesktopApplicationMenu.ts";
 import * as DesktopWindow from "../window/DesktopWindow.ts";
+import * as DesktopBackendManager from "../backend/DesktopBackendManager.ts";
 import * as DesktopBackendPool from "../backend/DesktopBackendPool.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 import * as DesktopLifecycle from "./DesktopLifecycle.ts";
@@ -30,6 +34,7 @@ import * as DesktopState from "./DesktopState.ts";
 import * as DesktopRemoteUpdates from "../updates/DesktopRemoteUpdates.ts";
 import * as DesktopUpdates from "../updates/DesktopUpdates.ts";
 import * as DesktopWslBackend from "../wsl/DesktopWslBackend.ts";
+import * as HttpClient from "effect/unstable/http/HttpClient";
 
 const DEFAULT_DESKTOP_BACKEND_PORT = 3773;
 const MAX_TCP_PORT = 65_535;
@@ -67,6 +72,53 @@ const { logInfo: logBootstrapInfo, logWarning: logBootstrapWarning } =
 
 const { logInfo: logStartupInfo, logError: logStartupError } =
   DesktopObservability.makeComponentLogger("desktop-startup");
+
+const DESKTOP_BOOTSTRAP_TOKEN_PATTERN = /^[0-9a-f]{48}$/i;
+
+const canAttachManagedDesktopService = Effect.fn("canAttachManagedDesktopService")(function* () {
+  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  if (environment.isDevelopment) return false;
+  const fs = yield* FileSystem.FileSystem;
+  const httpClient = yield* HttpClient.HttpClient;
+  const tokenPath = environment.path.join(
+    environment.baseDir,
+    "service",
+    "desktop-bootstrap-token",
+  );
+  const credential = yield* fs.readFileString(tokenPath).pipe(
+    Effect.map((value) => value.trim()),
+    Effect.option,
+  );
+  if (Option.isNone(credential) || !DESKTOP_BOOTSTRAP_TOKEN_PATTERN.test(credential.value)) {
+    return false;
+  }
+
+  const httpBaseUrl = new URL("http://127.0.0.1:" + DEFAULT_DESKTOP_BACKEND_PORT);
+  const ready = yield* DesktopBackendManager.waitForHttpReady({
+    executablePath: "managed-t3-service",
+    entryPath: "managed-t3-service",
+    cwd: environment.backendCwd,
+    httpBaseUrl,
+    timeout: Duration.seconds(2),
+  }).pipe(
+    Effect.provideService(HttpClient.HttpClient, httpClient),
+    Effect.match({ onFailure: () => false, onSuccess: () => true }),
+  );
+  if (!ready) return false;
+
+  return yield* bootstrapRemoteBearerSession({
+    httpBaseUrl: httpBaseUrl.href,
+    credential: credential.value,
+    clientMetadata: {
+      label: "T3 Code Desktop",
+      deviceType: "desktop",
+    },
+  }).pipe(
+    Effect.provideService(HttpClient.HttpClient, httpClient),
+    Effect.as(true),
+    Effect.catch(() => Effect.succeed(false)),
+  );
+});
 
 const resolveDesktopBackendPort = Effect.fn("resolveDesktopBackendPort")(function* (
   configuredPort: Option.Option<number>,
@@ -157,7 +209,17 @@ const bootstrap = Effect.gen(function* () {
     return yield* new DesktopDevelopmentBackendPortRequiredError();
   }
 
-  const backendPortSelection = yield* resolveDesktopBackendPort(environment.configuredBackendPort);
+  const attachExistingService = yield* canAttachManagedDesktopService();
+  const backendPortSelection = attachExistingService
+    ? {
+        port: DEFAULT_DESKTOP_BACKEND_PORT,
+        selectedByScan: false,
+        attachExisting: true,
+      }
+    : {
+        ...(yield* resolveDesktopBackendPort(environment.configuredBackendPort)),
+        attachExisting: false,
+      };
   const backendPort = backendPortSelection.port;
   yield* logBootstrapInfo(
     backendPortSelection.selectedByScan
@@ -166,6 +228,7 @@ const bootstrap = Effect.gen(function* () {
     {
       port: backendPort,
       ...(backendPortSelection.selectedByScan ? { startPort: DEFAULT_DESKTOP_BACKEND_PORT } : {}),
+      attachExisting: backendPortSelection.attachExisting,
     },
   );
 
@@ -175,7 +238,10 @@ const bootstrap = Effect.gen(function* () {
       mode: settings.serverExposureMode,
     });
   }
-  const serverExposureState = yield* serverExposure.configureFromSettings({ port: backendPort });
+  const serverExposureState = yield* serverExposure.configureFromSettings({
+    port: backendPort,
+    attachExisting: backendPortSelection.attachExisting,
+  });
   const backendConfig = yield* serverExposure.backendConfig;
   const electronProtocol = yield* ElectronProtocol.ElectronProtocol;
   const rendererTarget = environment.isDevelopment

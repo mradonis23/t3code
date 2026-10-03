@@ -23,7 +23,7 @@ import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import Constants from "expo-constants";
 import * as Network from "expo-network";
-import { AppState } from "react-native";
+import { AppState, Platform } from "react-native";
 
 import { authClientMetadata } from "../lib/authClientMetadata";
 import * as Runtime from "../lib/runtime";
@@ -31,7 +31,10 @@ import * as MobileStorage from "../persistence/mobile-storage";
 import { appAtomRegistry } from "../state/atom-registry";
 import { clearThreadOutboxEnvironment } from "../state/thread-outbox-removal";
 import { clearComposerDraftsEnvironment } from "../state/use-composer-drafts";
-import { mobileApplicationActiveWakeup } from "./app-state-wakeups";
+import {
+  mobileApplicationActiveWakeup,
+  type MobileApplicationActiveWakeup,
+} from "./app-state-wakeups";
 import { connectionStorageLayer } from "./storage";
 
 function networkStatus(state: Network.NetworkState): "unknown" | "offline" | "online" {
@@ -88,7 +91,7 @@ const connectivityLayer = Connectivity.layer({
 
 const wakeupsLayer = Wakeups.layer({
   changes: Stream.merge(
-    Stream.callback<"application-active-probe" | "application-active-reconnect">((queue) =>
+    Stream.callback<MobileApplicationActiveWakeup>((queue) =>
       Effect.acquireRelease(
         Effect.sync(() => {
           let backgroundedAtMs = AppState.currentState === "background" ? Date.now() : null;
@@ -98,7 +101,10 @@ const wakeupsLayer = Wakeups.layer({
               return;
             }
             if (state === "active") {
-              Queue.offerUnsafe(queue, mobileApplicationActiveWakeup(backgroundedAtMs, Date.now()));
+              Queue.offerUnsafe(
+                queue,
+                mobileApplicationActiveWakeup(backgroundedAtMs, Date.now(), Platform.OS),
+              );
               backgroundedAtMs = null;
             }
           });

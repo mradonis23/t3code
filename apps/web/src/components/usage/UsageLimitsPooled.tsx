@@ -356,6 +356,11 @@ function LegendRow({
         <span className="relative">{index}</span>
       </span>
       <AccountName account={account} className="min-w-0 truncate font-medium text-foreground" />
+      {account.enabled !== null ? (
+        <span className="text-xs text-muted-foreground">
+          {account.enabled ? "Enabled" : "Disabled"}
+        </span>
+      ) : null}
       <span className="shrink-0 font-semibold text-foreground tabular-nums">{remaining}%</span>
       <span className="ms-auto flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground tabular-nums">
         {resetsIn?.replace("resets in ", "↻ ") ?? ""}

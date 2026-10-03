@@ -15,6 +15,7 @@ import {
   RuntimeMode,
   ThreadId,
   type ModelSelection as ModelSelectionType,
+  type OrchestrationLatestTurn,
   type ProjectId as ProjectIdType,
   type ProviderInteractionMode as ProviderInteractionModeType,
   type RuntimeMode as RuntimeModeType,
@@ -27,8 +28,7 @@ import type { DraftComposerAttachment } from "../lib/composerImages";
 import { scopedThreadKey } from "../lib/scopedEntities";
 import { resolveProviderInteractionMode } from "../features/threads/legacy-plan-mode";
 
-// Keep current writes until a compatible native baseline includes the v4 reader.
-const THREAD_OUTBOX_SCHEMA_VERSION = 3;
+const THREAD_OUTBOX_SCHEMA_VERSION = 4;
 const THREAD_OUTBOX_MAX_RETRY_DELAY_MS = 16_000;
 
 const QueuedThreadCreationSchema = Schema.Struct({
@@ -54,6 +54,7 @@ export const QueuedThreadMessageSchema = Schema.Struct({
   modelSelection: Schema.optional(ModelSelection),
   runtimeMode: Schema.optional(RuntimeMode),
   interactionMode: Schema.optional(ProviderInteractionMode),
+  deliveryMode: Schema.optional(Schema.Literals(["immediate", "after-success", "steer", "paused"])),
   // Present when the queued item creates a brand-new thread (pending task)
   // instead of appending a turn to an existing one.
   creation: Schema.optional(QueuedThreadCreationSchema),
@@ -83,6 +84,7 @@ export interface QueuedThreadMessage {
   readonly modelSelection?: ModelSelectionType;
   readonly runtimeMode?: RuntimeModeType;
   readonly interactionMode?: ProviderInteractionModeType;
+  readonly deliveryMode?: "immediate" | "after-success" | "steer" | "paused";
   readonly creation?: QueuedThreadCreation;
   readonly createdAt: string;
 }
@@ -91,6 +93,54 @@ export interface ThreadSettingsSnapshot {
   readonly modelSelection: ModelSelectionType;
   readonly runtimeMode: RuntimeModeType;
   readonly interactionMode: ProviderInteractionModeType;
+}
+
+export type ComposerSendIntent = "default" | "steer";
+
+export function resolveComposerDeliveryMode(input: {
+  readonly intent: ComposerSendIntent;
+  readonly connected: boolean;
+  readonly threadBusy: boolean;
+}): NonNullable<QueuedThreadMessage["deliveryMode"]> {
+  if (input.intent === "steer") return "steer";
+  return input.connected && !input.threadBusy ? "immediate" : "after-success";
+}
+
+export function reorderQueuedThreadMessages(
+  messages: ReadonlyArray<QueuedThreadMessage>,
+  messageId: MessageId,
+  direction: -1 | 1,
+): ReadonlyArray<QueuedThreadMessage> {
+  const index = messages.findIndex((message) => message.messageId === messageId);
+  const neighborIndex = index + direction;
+  if (index < 0 || neighborIndex < 0 || neighborIndex >= messages.length) return messages;
+  const next = [...messages];
+  const message = messages[index]!;
+  const neighbor = messages[neighborIndex]!;
+  next[index] = { ...neighbor, createdAt: message.createdAt };
+  next[neighborIndex] = { ...message, createdAt: neighbor.createdAt };
+  return next;
+}
+
+export function prioritizeQueuedThreadMessage(
+  messages: ReadonlyArray<QueuedThreadMessage>,
+  messageId: MessageId,
+  deliveryMode: "immediate" | "steer",
+): ReadonlyArray<QueuedThreadMessage> {
+  const index = messages.findIndex((message) => message.messageId === messageId);
+  if (index <= 0) {
+    return index === 0 ? [{ ...messages[0]!, deliveryMode }, ...messages.slice(1)] : messages;
+  }
+  const timestamps = messages.map((message) => message.createdAt);
+  const prioritized = messages[index]!;
+  return [
+    { ...prioritized, createdAt: timestamps[0]!, deliveryMode },
+    ...messages.slice(0, index).map((message, priorIndex) => ({
+      ...message,
+      createdAt: timestamps[priorIndex + 1]!,
+    })),
+    ...messages.slice(index + 1),
+  ];
 }
 
 export function resolveQueuedThreadSettings(
@@ -169,22 +219,30 @@ export function resolveThreadOutboxDeliveryAction(input: {
   readonly shellStatus: EnvironmentShellStatus;
   readonly environmentConnected: boolean;
   readonly threadBusy: boolean;
+  readonly deliveryMode?: QueuedThreadMessage["deliveryMode"];
+  readonly successfulCompletionAvailable?: boolean;
 }): ThreadOutboxDeliveryAction {
   if (input.isCreation) {
-    // A pending task creates its thread on delivery. If the thread already
-    // exists the creation command went through and only cleanup remains.
-    if (input.threadExists) {
-      return "remove";
-    }
-    // Wait for the shell to be live before sending: until the thread list has
-    // synchronized, a previously delivered creation whose cleanup failed would
-    // look missing and get re-issued, duplicating the thread.
+    if (input.threadExists) return "remove";
     return input.environmentConnected && input.shellStatus === "live" ? "send" : "wait";
   }
   if (!input.threadExists) {
     return input.shellStatus === "live" ? "remove" : "wait";
   }
-  return input.environmentConnected ? "send" : "wait";
+  if (!input.environmentConnected) return "wait";
+  if (input.deliveryMode === "immediate" || input.deliveryMode === "steer") return "send";
+  return !input.threadBusy && input.successfulCompletionAvailable === true ? "send" : "wait";
+}
+
+export function successfulQueuedTurnCompletion(
+  previous: OrchestrationLatestTurn | null | undefined,
+  current: OrchestrationLatestTurn | null | undefined,
+): string | null {
+  return previous?.state === "running" &&
+    current?.state === "completed" &&
+    previous.turnId === current.turnId
+    ? current.turnId
+    : null;
 }
 
 export type ThreadOutboxDispatchStep =

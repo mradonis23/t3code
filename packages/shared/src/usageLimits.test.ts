@@ -98,7 +98,7 @@ describe("limitsNotice", () => {
 });
 
 describe("providersWithLimits", () => {
-  it("keeps only usable providers whose driver reports limits at all", () => {
+  it("keeps reported limits regardless of runtime availability or enabled state", () => {
     const limits = { checkedAt: "2026-09-03T11:00:00.000Z", windows: [window] };
     const codex = provider({ usageLimits: limits });
     expect(
@@ -124,7 +124,12 @@ describe("providersWithLimits", () => {
           usageLimits: limits,
         }),
       ]),
-    ).toEqual([codex]);
+    ).toMatchObject([
+      codex,
+      { instanceId: "off", enabled: false, usageLimits: limits },
+      { instanceId: "gone", installed: false, usageLimits: limits },
+      { instanceId: "shadow", availability: "unavailable", usageLimits: limits },
+    ]);
   });
 });
 
@@ -238,9 +243,6 @@ describe("collectLimitSources", () => {
   });
 
   it.each([
-    { enabled: false },
-    { installed: false },
-    { availability: "unavailable" },
     { usageLimits: undefined },
     { usageLimits: { ...limits, windows: [] } },
     { usageLimits: { ...limits, unavailable: { reason: "probeFailed" } } },
@@ -314,6 +316,48 @@ describe("collectLimitSources", () => {
 });
 
 describe("pools", () => {
+  it("keeps main Codex, Mom, and Nena telemetry and enabled states distinct", () => {
+    const providers = [
+      provider({ instanceId: ProviderInstanceId.make("codex"), displayName: "Codex" }),
+      provider({ instanceId: ProviderInstanceId.make("mom"), displayName: "Mom", enabled: false }),
+      provider({
+        instanceId: ProviderInstanceId.make("nena"),
+        displayName: "Nena",
+        availability: "unavailable",
+      }),
+    ].map((entry, index) => ({
+      ...entry,
+      auth: { ...entry.auth, email: `${entry.instanceId}@example.com` },
+      usageLimits: {
+        checkedAt: "2026-09-03T11:00:00.000Z",
+        windows: [{ ...window, usedPercent: index * 20 }],
+      },
+    }));
+    const accounts = collectLimitAccounts(
+      new Map([
+        [
+          EnvironmentId.make("desktop"),
+          {
+            entry: { target: { label: "Desktop" } },
+            serverConfig: { providers },
+          },
+        ],
+      ]),
+    );
+    expect(
+      accounts.map((account) => ({
+        name: account.displayName,
+        enabled: account.enabled,
+        used: account.limits.windows[0]?.usedPercent,
+      })),
+    ).toEqual([
+      { name: "Codex", enabled: true, used: 0 },
+      { name: "Mom", enabled: false, used: 20 },
+      { name: "Nena", enabled: true, used: 40 },
+    ]);
+    expect(collectLimitPools(accounts, now)[0]?.accounts).toHaveLength(3);
+  });
+
   const checkedAt = "2026-09-03T11:00:00.000Z";
   const weekly = {
     id: "seven_day",
@@ -599,6 +643,7 @@ describe("pools", () => {
           key: "go",
           driver: claude,
           displayName: "Go",
+          enabled: null,
           email: undefined,
           plan: undefined,
           accentColor: undefined,
@@ -774,7 +819,7 @@ describe("/usage-limits", () => {
         [],
         now,
       ),
-    ).toBeNull();
+    ).toMatchObject({ accounts: [{ instanceId: "codex", limits }] });
   });
 
   it("surfaces source errors only for sources that carry the selected driver", () => {

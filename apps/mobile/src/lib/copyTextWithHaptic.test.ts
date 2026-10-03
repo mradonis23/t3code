@@ -87,6 +87,8 @@ describe("copyTextWithHaptic", () => {
     const diagnostics = JSON.stringify(consoleError.mock.calls);
     expect(diagnostics).not.toContain("private-state");
     expect(diagnostics).not.toContain("private-code");
-    expect(diagnostics).not.toContain("cause");
+    for (const [, detail] of consoleError.mock.calls) {
+      expect(detail).not.toHaveProperty("cause");
+    }
   });
 });

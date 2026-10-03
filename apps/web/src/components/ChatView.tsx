@@ -85,6 +85,7 @@ import {
 import { flushSync } from "react-dom";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
+import { buildCheckpointContinuation } from "@t3tools/shared/checkpointContinuation";
 import { assistantCitationFromLocation } from "../lib/assistantCitationNavigation";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 import { useShallow } from "zustand/react/shallow";
@@ -752,7 +753,7 @@ function useLocalDispatchState(input: {
   };
 }
 
-/** Same terminal ids (order ignored) — avoids reconcile when only server session ordering differs. */
+/** Same terminal ids (order ignored) â€” avoids reconcile when only server session ordering differs. */
 function terminalIdListsEqual(left: readonly string[], right: readonly string[]): boolean {
   if (left.length !== right.length) {
     return false;
@@ -902,7 +903,7 @@ const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDra
   );
   // Every client-side id source participates in allocation: the server list
   // lags fresh opens, and panel terminals are filtered out of the drawer's
-  // sessions — an id collision attaches two viewports to one PTY session.
+  // sessions â€” an id collision attaches two viewports to one PTY session.
   const allocatableTerminalIds = useMemo(
     () => [
       ...new Set([
@@ -1355,7 +1356,7 @@ const ENVIRONMENT_UNAVAILABLE_SEND_TOAST_TRAIL_SIZE = 3;
 /**
  * Drops the send-time anchored end space. That space is what holds a sent
  * message near the top while its turn streams, and it keeps LegendList's
- * maintainScrollAtEnd switched off for as long as it is installed — ChatView
+ * maintainScrollAtEnd switched off for as long as it is installed â€” ChatView
  * drives the streaming scrolls itself, but only in "anchoring-new-turn" mode.
  * So every return to the live edge has to release the anchor too, otherwise the
  * timeline settles into "following-end" with nothing following anything.
@@ -1494,7 +1495,7 @@ export default function ChatView(props: ChatViewProps) {
       : null;
   }, [citationLocation.href, citationLocation.key, environmentId, threadId]);
   const { resolvedTheme } = useTheme();
-  // Granular store selectors — avoid subscribing to prompt changes.
+  // Granular store selectors â€” avoid subscribing to prompt changes.
   const composerRuntimeMode = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.runtimeMode ?? null,
   );
@@ -1948,7 +1949,7 @@ export default function ChatView(props: ChatViewProps) {
     (activeThread?.session?.status === "running" ? activeThread.session.activeTurnId : null) ??
     (activeLatestTurn?.state === "running" ? activeLatestTurn.turnId : null);
   // Reading a finished thread clears the sidebar's Done badge. The visit is
-  // stamped at the turn's completion time — not now/updatedAt — so it clears
+  // stamped at the turn's completion time â€” not now/updatedAt â€” so it clears
   // exactly the completion the user is looking at: a wake or completion that
   // lands later still gets its signal (markThreadVisited never moves the
   // timestamp backwards).
@@ -2443,7 +2444,7 @@ export default function ChatView(props: ChatViewProps) {
               />
               <TooltipPopup side="top">
                 {versionMismatchServerLabel} {versionMismatch.serverVersion}{" "}
-                <span aria-hidden="true">→</span> {versionMismatch.clientVersion}
+                <span aria-hidden="true">â†’</span> {versionMismatch.clientVersion}
               </TooltipPopup>
             </Tooltip>
           ) : (
@@ -3109,6 +3110,25 @@ export default function ChatView(props: ChatViewProps) {
     refresh: gitStatusQuery.refresh,
     resourceKey: `git-status:${activeThreadKey ?? ""}:${gitStatusCwd ?? ""}`,
   });
+  const checkpointContinuation = useMemo(
+    () =>
+      activeThread
+        ? buildCheckpointContinuation({
+            thread: activeThread,
+            connectionState: activeEnvironmentConnectionPhase,
+            gitStatus: gitStatusQuery.data ?? null,
+            projectTitle: activeProject?.title ?? null,
+            projectWorkspaceRoot: activeProject?.workspaceRoot ?? null,
+          })
+        : null,
+    [
+      activeEnvironmentConnectionPhase,
+      activeProject?.title,
+      activeProject?.workspaceRoot,
+      activeThread,
+      gitStatusQuery.data,
+    ],
+  );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const availableEditors = useAtomValue(primaryServerAvailableEditorsAtom);
   const manualCompactionProviderAvailable = useMemo(
@@ -3338,7 +3358,7 @@ export default function ChatView(props: ChatViewProps) {
     ? draftThread?.loadBalancedEnvironmentId
       ? "Auto balance"
       : loadBalancing.pending
-        ? "Checking machines…"
+        ? "Checking machinesâ€¦"
         : "Auto balance unavailable"
     : undefined;
 
@@ -4680,7 +4700,7 @@ export default function ChatView(props: ChatViewProps) {
         const scrollNode = legendListRef.current?.getScrollableNode();
         if (!scrollNode) {
           // The list may not have mounted on the first frame after a thread
-          // switch — without a retry the opt-out listeners never attach and
+          // switch â€” without a retry the opt-out listeners never attach and
           // live-follow becomes impossible to escape for the whole thread.
           if (remainingAttempts > 0) {
             attach(remainingAttempts - 1);
@@ -4724,7 +4744,7 @@ export default function ChatView(props: ChatViewProps) {
         };
         // Touch direction isn't observable here (touchmove fires on any
         // finger motion, scrolling or not), so break only once the drag has
-        // actually carried the viewport out of the end band — an upward flick
+        // actually carried the viewport out of the end band â€” an upward flick
         // gets there within its first few events and later touchmoves break.
         const handleTouchMove = () => {
           if (viewportIsAwayFromEnd()) {
@@ -5404,7 +5424,7 @@ export default function ChatView(props: ChatViewProps) {
       input: buildThreadTurnInterruptInput(activeThread),
     });
     if (result._tag === "Failure") {
-      // Every failure clears the pending state — an interrupted command
+      // Every failure clears the pending state â€” an interrupted command
       // never reached the server, so liveness would hold "Stopping..."
       // forever. Only real failures toast.
       setIsStoppingBackgroundWork(false);
@@ -5655,7 +5675,9 @@ export default function ChatView(props: ChatViewProps) {
         icon: <GitBranchIcon />,
         title: (
           <span className="flex min-w-0 items-baseline gap-1.5">
-            <span className="shrink-0 font-normal text-muted-foreground">Branch changed — was</span>
+            <span className="shrink-0 font-normal text-muted-foreground">
+              Branch changed â€” was
+            </span>
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -6914,6 +6936,23 @@ export default function ChatView(props: ChatViewProps) {
     }
   };
 
+  const onContinueFromCheckpoint = async () => {
+    if (!checkpointContinuation) return;
+    if (composerHasUnsentContent) {
+      toastManager.add({
+        type: "warning",
+        title: "Draft already in composer",
+        description:
+          "Send, stash, or clear the current draft before continuing from the checkpoint.",
+      });
+      return;
+    }
+    promptRef.current = checkpointContinuation.prompt;
+    setComposerDraftPrompt(composerDraftTarget, checkpointContinuation.prompt);
+    composerRef.current?.resetCursorState();
+    await onSend(undefined, "foreground");
+  };
+
   const onInterrupt = async () => {
     if (!activeThread) return;
     const result = await interruptThreadTurn({
@@ -7856,7 +7895,10 @@ export default function ChatView(props: ChatViewProps) {
                 onOpenProviderSetup={openProviderSetup}
               />
               <ThreadErrorBanner
-                error={visibleThreadError}
+                error={visibleThreadError ?? checkpointContinuation?.reason ?? null}
+                {...(checkpointContinuation
+                  ? { onContinue: () => void onContinueFromCheckpoint() }
+                  : {})}
                 onDismiss={() => {
                   setThreadError(activeThread.id, null);
                   dismissThreadErrorBannerForSession(threadErrorBannerKey);
@@ -7866,7 +7908,7 @@ export default function ChatView(props: ChatViewProps) {
             </div>
             {/* Messages Wrapper */}
             <div className="relative flex min-h-0 flex-1 flex-col">
-              {/* Messages — LegendList handles virtualization and scrolling internally */}
+              {/* Messages â€” LegendList handles virtualization and scrolling internally */}
               <MessagesTimeline
                 citationRequest={citationRequest}
                 citationHistoryLoading={threadDetailLoading}
@@ -7915,7 +7957,7 @@ export default function ChatView(props: ChatViewProps) {
                 loadEarlier={loadEarlierTurns}
               />
 
-              {/* scroll to end pill — shown when user has scrolled away from the live edge */}
+              {/* scroll to end pill â€” shown when user has scrolled away from the live edge */}
               {showScrollToBottom && (
                 <div
                   className="pointer-events-none absolute left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5"
@@ -7939,7 +7981,7 @@ export default function ChatView(props: ChatViewProps) {
               )}
             </div>
 
-            {/* Input bar — centered hero while a draft has no messages, docked at the bottom otherwise */}
+            {/* Input bar â€” centered hero while a draft has no messages, docked at the bottom otherwise */}
             <div
               ref={setComposerOverlayElement}
               data-chat-composer-overlay="true"

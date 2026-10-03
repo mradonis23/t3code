@@ -510,6 +510,7 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
       },
       // Primary wants process.env (PATH, dev-runner's T3CODE_HOME, etc.).
       extendEnv: true,
+      launchMode: backendExposure.attachExisting ? "attach" : "spawn",
       bootstrap,
       bootstrapDelivery: "fd3",
       httpBaseUrl: backendExposure.httpBaseUrl,
@@ -804,12 +805,32 @@ export const make = Effect.gen(function* () {
   });
 
   const buildWindowsPrimaryConfig = Effect.gen(function* () {
+    const backendExposure = yield* serverExposure.backendConfig;
     const shared = yield* sharedInputs;
+    let bootstrapToken = shared.bootstrapToken;
+    if (backendExposure.attachExisting) {
+      const persistentTokenPath = environment.path.join(
+        environment.baseDir,
+        "service",
+        "desktop-bootstrap-token",
+      );
+      const persisted = yield* fileSystem.readFileString(persistentTokenPath).pipe(Effect.option);
+      if (Option.isSome(persisted)) {
+        const token = persisted.value.trim();
+        if (/^[0-9a-f]{48}$/i.test(token)) {
+          bootstrapToken = token;
+        }
+      }
+    }
     const resourceMonitorPath = yield* resolveResourceMonitorPath().pipe(
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
     );
-    return yield* resolvePrimaryStartConfig({ ...shared, resourceMonitorPath }).pipe(
+    return yield* resolvePrimaryStartConfig({
+      ...shared,
+      bootstrapToken,
+      resourceMonitorPath,
+    }).pipe(
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
       Effect.provideService(DesktopServerExposure.DesktopServerExposure, serverExposure),
     );

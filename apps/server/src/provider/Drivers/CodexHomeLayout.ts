@@ -31,6 +31,13 @@ const KNOWN_SHARED_DIRECTORIES = [
 
 const PRIVATE_ENTRY_NAMES = new Set(["auth.json", "models_cache.json"]);
 const SHADOW_LOCAL_ENTRY_NAMES = new Set(["log", "memories", "tmp"]);
+// SQLite databases and their journals must stay together in the runtime home.
+const SHADOW_LOCAL_DATABASE =
+  /^(?:goals|logs|memories|queue|state|thread_history)(?:_\d+)?\.sqlite(?:-(?:shm|wal))?$/;
+
+function isShadowLocalEntry(entryName: string): boolean {
+  return SHADOW_LOCAL_ENTRY_NAMES.has(entryName) || SHADOW_LOCAL_DATABASE.test(entryName);
+}
 const REPLACEABLE_SHARED_RUNTIME_DIRECTORIES = new Set(["mcp-oauth-locks"]);
 
 function resolveHomePath(path: Path.Path, value: string | undefined): string {
@@ -358,21 +365,37 @@ export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome"
     { concurrency: "unbounded" },
   );
 
-  const sharedEntryNames = yield* fileSystem.readDirectory(layout.sharedHomePath).pipe(
-    Effect.catchTags({
-      PlatformError: (cause) =>
-        new CodexShadowHomeFileSystemError({
-          sharedHomePath: layout.sharedHomePath,
-          effectiveHomePath,
-          operation: "readDirectory",
-          path: layout.sharedHomePath,
-          cause,
-        }),
-    }),
+  const readEntryNames = (directoryPath: string) =>
+    fileSystem.readDirectory(directoryPath).pipe(
+      Effect.catchTags({
+        PlatformError: (cause) =>
+          new CodexShadowHomeFileSystemError({
+            sharedHomePath: layout.sharedHomePath,
+            effectiveHomePath,
+            operation: "readDirectory",
+            path: directoryPath,
+            cause,
+          }),
+      }),
+    );
+  const sharedEntryNames = yield* readEntryNames(layout.sharedHomePath);
+  const shadowEntryNames = yield* readEntryNames(effectiveHomePath);
+  // Older overlays linked these databases. Unlink only the overlay entry;
+  // never copy an open database or remove its shared target.
+  yield* Effect.forEach(
+    shadowEntryNames.filter((entryName) => SHADOW_LOCAL_DATABASE.test(entryName)),
+    (entryName) =>
+      removePrivateSymlink({
+        fileSystem,
+        sharedHomePath: layout.sharedHomePath,
+        effectiveHomePath,
+        entryName,
+      }),
+    { discard: true },
   );
   const entries = new Set<string>(KNOWN_SHARED_DIRECTORIES);
   for (const entryName of sharedEntryNames) {
-    if (!PRIVATE_ENTRY_NAMES.has(entryName) && !SHADOW_LOCAL_ENTRY_NAMES.has(entryName)) {
+    if (!PRIVATE_ENTRY_NAMES.has(entryName) && !isShadowLocalEntry(entryName)) {
       entries.add(entryName);
     }
   }

@@ -2,7 +2,9 @@ import * as NetService from "@t3tools/shared/Net";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import { DesktopBackendBootstrap, PortSchema } from "@t3tools/contracts";
 import * as Config from "effect/Config";
+import * as Crypto from "effect/Crypto";
 import * as Duration from "effect/Duration";
+import * as Encoding from "effect/Encoding";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as LogLevel from "effect/LogLevel";
@@ -74,6 +76,33 @@ export const tailscaleServePortFlag = Flag.integer("tailscale-serve-port").pipe(
   Flag.withDescription("HTTPS port for Tailscale Serve when --tailscale-serve is enabled."),
   Flag.optional,
 );
+
+const DESKTOP_BOOTSTRAP_TOKEN_FILE = "desktop-bootstrap-token";
+const DESKTOP_BOOTSTRAP_TOKEN_PATTERN = /^[0-9a-f]{48}$/i;
+
+const loadOrCreatePersistentDesktopBootstrapToken = Effect.fn(
+  "cli.loadOrCreatePersistentDesktopBootstrapToken",
+)(function* (baseDir: string) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const crypto = yield* Crypto.Crypto;
+  const serviceDir = path.join(baseDir, "service");
+  const tokenPath = path.join(serviceDir, DESKTOP_BOOTSTRAP_TOKEN_FILE);
+  yield* fs.makeDirectory(serviceDir, { recursive: true });
+
+  const existing = yield* fs.readFileString(tokenPath).pipe(Effect.option);
+  if (Option.isSome(existing)) {
+    const token = existing.value.trim();
+    if (DESKTOP_BOOTSTRAP_TOKEN_PATTERN.test(token)) return token;
+    yield* Effect.logWarning("replacing invalid persistent desktop bootstrap credential", {
+      path: tokenPath,
+    });
+  }
+
+  const token = Encoding.encodeHex(yield* crypto.randomBytes(24));
+  yield* fs.writeFileString(tokenPath, token + "\n");
+  return token;
+});
 
 const EnvServerConfig = Config.all({
   logLevel: Config.logLevel("T3CODE_LOG_LEVEL").pipe(Config.withDefault("Info")),
@@ -300,7 +329,11 @@ export const resolveServerConfig = (
       ),
       () => mode === "desktop",
     );
-    const desktopBootstrapToken = bootstrap?.desktopBootstrapToken;
+    const desktopBootstrapToken =
+      bootstrap?.desktopBootstrapToken ??
+      (mode === "desktop"
+        ? yield* loadOrCreatePersistentDesktopBootstrapToken(baseDir)
+        : undefined);
     const desktopTelemetryFd = bootstrap?.desktopTelemetryFd;
     const desktopTelemetryControlFd = bootstrap?.desktopTelemetryControlFd;
     const resourceMonitorPath = bootstrap?.resourceMonitorPath;

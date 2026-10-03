@@ -29,11 +29,12 @@ interface ComposerPrimaryActionsProps {
   isPreparingWorktree: boolean;
   hasSendableContent: boolean;
   preserveComposerFocusOnPointerDown?: boolean;
-  /** Enter-to-send is disabled on mobile viewports, where stop would otherwise
-   * be the only primary action and a running turn could not be steered. */
+  /** Keep sending available beside Stop so a running turn can be queued or steered. */
   showSendWhileRunning?: boolean;
   onPreviousPendingQuestion: () => void;
   onInterrupt: () => void;
+  onQueue?: () => void;
+  onSteer?: () => void;
   onImplementPlanInNewThread: () => void;
 }
 
@@ -75,6 +76,8 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   showSendWhileRunning = false,
   onPreviousPendingQuestion,
   onInterrupt,
+  onQueue,
+  onSteer,
   onImplementPlanInNewThread,
 }: ComposerPrimaryActionsProps) {
   const pointerFocusProps = preserveComposerFocusOnPointerDown
@@ -276,9 +279,33 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   }
 
   return (
-    <>
+    <div className="flex items-center justify-end gap-2">
       {renderStopGenerationButton(false)}
-      {showSendWhileRunning && hasSendableContent ? sendButton : null}
-    </>
+      {showSendWhileRunning && hasSendableContent ? (
+        <>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="rounded-full"
+            {...pointerFocusProps}
+            disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
+            onClick={onQueue}
+          >
+            Queue
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="rounded-full bg-message-action text-message-action-foreground hover:bg-message-action-hover"
+            {...pointerFocusProps}
+            disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
+            onClick={onSteer}
+          >
+            Steer
+          </Button>
+        </>
+      ) : null}
+    </div>
   );
 });
