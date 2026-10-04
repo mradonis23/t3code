@@ -89,7 +89,9 @@ export function AppearancePreferencesProvider(props: { readonly children: ReactN
   );
   // Preference patches are optimistic. Keep controls interactive while a save is
   // in flight so rapid theme choices can supersede one another immediately.
-  const isReady = AsyncResult.isSuccess(preferencesResult);
+  // Never let a stalled preference read hold the native splash screen forever.
+  // Rendering already has safe default appearance values while persistence hydrates.
+  const isReady = true;
   const runtimeState = useMemo<MobileThemeRuntimeState>(
     () => ({
       baseFontSize,

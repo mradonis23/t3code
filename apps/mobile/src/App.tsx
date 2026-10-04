@@ -51,7 +51,7 @@ function SplashScreenCoordinator() {
   const { isReady } = useAppearancePreferences();
 
   useEffect(() => {
-    if (isReady) void SplashScreen.hide();
+    if (isReady) void SplashScreen.hideAsync().catch(() => {});
   }, [isReady]);
 
   return null;
