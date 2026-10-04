@@ -9,15 +9,27 @@ import type { ComposerBannerStackItem } from "./ComposerBannerStack";
 
 /** Driver name, then the instance when there could be more than one of that driver. */
 function accountLabel(account: UsageLimitsReport["accounts"][number]): string {
+  if (account.driver === "codex" && account.instanceId) {
+    if (account.instanceId === "codex_mom") return "Mom's Codex";
+    if (account.instanceId === "codex_nena") return "Nana's Codex";
+    if (account.instanceId === "codex") return "Dad's Codex";
+  }
   if (!account.instanceId) return account.label;
   const driver = getDriverOption(account.driver)?.label ?? String(account.driver);
   const instance =
     account.displayName?.trim() ||
     (String(account.instanceId) !== String(account.driver) ? account.instanceId : "");
-  // The default instance is often named after its driver; saying it twice adds nothing.
   return instance && instance.toLowerCase() !== driver.toLowerCase()
     ? `${driver} · ${instance}`
     : driver;
+}
+
+function accountIdentityColor(account: UsageLimitsReport["accounts"][number]): string | null {
+  if (account.driver !== "codex" || !account.instanceId) return null;
+  if (account.instanceId === "codex_mom") return "#FF9F0A";
+  if (account.instanceId === "codex_nena") return "#30D158";
+  if (account.instanceId === "codex") return "#0A84FF";
+  return null;
 }
 
 /** The /usage-limits result as a composer notice: it stacks under warnings and dismisses like one. */
@@ -61,8 +73,17 @@ function UsageLimitsBannerBody({
           return (
             <div key={account.id} className="flex min-w-0 flex-col gap-1">
               {report.accounts.length > 1 ? (
-                <span className="truncate text-xs text-muted-foreground">
-                  {[accountLabel(account), account.plan].filter(Boolean).join(" · ")}
+                <span className="flex min-w-0 items-center gap-1.5 truncate text-xs text-muted-foreground">
+                  {accountIdentityColor(account) ? (
+                    <span
+                      className="size-2 shrink-0 rounded-full"
+                      style={{ backgroundColor: accountIdentityColor(account) ?? undefined }}
+                      aria-hidden="true"
+                    />
+                  ) : null}
+                  <span className="truncate">
+                    {[accountLabel(account), account.plan].filter(Boolean).join(" · ")}
+                  </span>
                 </span>
               ) : null}
               {notice ? (
