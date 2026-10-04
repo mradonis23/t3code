@@ -1074,7 +1074,7 @@ export function HomeScreen(props: HomeScreenProps) {
       provider.driver === "codex" && provider.usageLimits ? [{ environmentId, provider }] : [],
     ),
   );
-  const activeRunningThread =
+  const activeLimitEntry =
     [...props.threads]
       .filter(
         (thread) => thread.session?.status === "running" || thread.session?.status === "starting",
@@ -1083,19 +1083,20 @@ export function HomeScreen(props: HomeScreenProps) {
         (left, right) =>
           Date.parse(right.session?.updatedAt ?? right.updatedAt ?? right.createdAt) -
           Date.parse(left.session?.updatedAt ?? left.updatedAt ?? left.createdAt),
-      )[0] ?? null;
-  const activeRunningInstanceId =
-    activeRunningThread?.session?.providerInstanceId ??
-    activeRunningThread?.modelSelection.instanceId ??
-    null;
-  const activeLimitEntry =
-    activeRunningThread && activeRunningInstanceId
-      ? (homeLimitEntries.find(
+      )
+      .flatMap((thread) => {
+        const instanceId =
+          thread.session?.providerInstanceId ?? thread.modelSelection.instanceId ?? null;
+        if (!instanceId) return [];
+        const entry = homeLimitEntries.find(
           ({ environmentId, provider }) =>
-            environmentId === activeRunningThread.environmentId &&
-            provider.instanceId === activeRunningInstanceId,
-        ) ?? null)
-      : null;
+            environmentId === thread.environmentId && provider.instanceId === instanceId,
+        );
+        return entry ? [entry] : [];
+      })[0] ??
+    homeLimitEntries.find(({ provider }) => provider.instanceId === "codex") ??
+    homeLimitEntries[0] ??
+    null;
   const visibleHomeLimitEntries = limitsExpanded
     ? homeLimitEntries
     : activeLimitEntry
@@ -1122,11 +1123,6 @@ export function HomeScreen(props: HomeScreenProps) {
                   : "Details"}
             </Text>
           </View>
-          {!limitsExpanded && activeLimitEntry === null ? (
-            <Text className="mt-1 text-xs text-foreground-tertiary">
-              No Codex session is running. Tap to view all account limits.
-            </Text>
-          ) : null}
         </Pressable>
         {visibleHomeLimitEntries.map(({ environmentId, provider }, index) => {
           const account = codexAccountPresentation(provider.instanceId);

@@ -4,6 +4,7 @@ import {
   collectProviderUsageLimits,
   hasProviderUsageLimits,
   isUsageLimitsCommand,
+  remainingPercent,
 } from "@t3tools/shared/usageLimits";
 import { usageLimitsBannerItem } from "./chat/ComposerUsageLimits";
 import { derivePendingRequests } from "@t3tools/client-runtime/pending-requests";
@@ -2745,6 +2746,24 @@ export default function ChatView(props: ChatViewProps) {
   const usageLimitsOffered =
     activeProviderStatus !== null &&
     hasProviderUsageLimits(activeProviderStatus.driver, providerStatuses, usageLimitSources);
+  const activeCodexIdentity =
+    activeProviderStatus?.driver === "codex"
+      ? activeProviderStatus.instanceId === "codex_mom"
+        ? { label: "Mom's Codex", color: "#FF9F0A" }
+        : activeProviderStatus.instanceId === "codex_nena"
+          ? { label: "Nana's Codex", color: "#30D158" }
+          : { label: "Dad's Codex", color: "#0A84FF" }
+      : null;
+  const activeSessionLimit = activeProviderStatus?.usageLimits?.windows.find(
+    (window) => window.label.toLowerCase() === "session",
+  );
+  const activeWeeklyLimit = activeProviderStatus?.usageLimits?.windows.find(
+    (window) => window.label.toLowerCase() === "weekly",
+  );
+  const activeThreadLimitsLabel =
+    activeCodexIdentity && activeSessionLimit && activeWeeklyLimit
+      ? `${activeCodexIdentity.label} · Session ${remainingPercent(activeSessionLimit)}% left · Weekly ${remainingPercent(activeWeeklyLimit)}% left`
+      : (activeCodexIdentity?.label ?? null);
   // Answered locally from the last Limits snapshot; the agent never sees it.
   const openUsageLimits = useCallback(() => {
     const now = Date.now();
@@ -8473,6 +8492,25 @@ export default function ChatView(props: ChatViewProps) {
                     <ComposerSurface.Shell contextStrip={showComposerContextStrip}>
                       <ComposerSurface.Host>
                         <div ref={attachDraftHeroComposerAnchorRef} className="relative z-10">
+                          {usageLimitsOffered && activeThreadLimitsLabel && activeCodexIdentity ? (
+                            <div className="flex justify-end px-2 pb-1">
+                              <button
+                                type="button"
+                                aria-label={`${activeCodexIdentity.label} limits`}
+                                title="Show all Codex account limits"
+                                onClick={openUsageLimits}
+                                className="flex max-w-full items-center gap-2 rounded-full border bg-background/90 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm hover:bg-muted"
+                                style={{ borderColor: activeCodexIdentity.color }}
+                              >
+                                <span
+                                  className="size-2 shrink-0 rounded-full"
+                                  style={{ backgroundColor: activeCodexIdentity.color }}
+                                  aria-hidden="true"
+                                />
+                                <span className="truncate">{activeThreadLimitsLabel}</span>
+                              </button>
+                            </div>
+                          ) : null}
                           <ChatComposer
                             composerRef={composerRef}
                             composerDraftTarget={composerDraftTarget}

@@ -114,7 +114,7 @@ export function SidebarCodexLimitsSummary() {
   const accounts = collectLimitAccounts(presentations).filter(
     (account) => account.driver === "codex",
   );
-  const activeRunningThread =
+  const activeAccount =
     [...threadShells]
       .filter(
         (thread) => thread.session?.status === "running" || thread.session?.status === "starting",
@@ -123,19 +123,21 @@ export function SidebarCodexLimitsSummary() {
         (left, right) =>
           Date.parse(right.session?.updatedAt ?? right.updatedAt ?? right.createdAt) -
           Date.parse(left.session?.updatedAt ?? left.updatedAt ?? left.createdAt),
-      )[0] ?? null;
-  const activeInstanceId =
-    activeRunningThread?.session?.providerInstanceId ??
-    activeRunningThread?.modelSelection.instanceId ??
+      )
+      .flatMap((thread) => {
+        const instanceId =
+          thread.session?.providerInstanceId ?? thread.modelSelection.instanceId ?? null;
+        if (!instanceId) return [];
+        const account = accounts.find(
+          (candidate) =>
+            candidate.redeem?.instanceId === instanceId &&
+            candidate.redeem.environmentId === thread.environmentId,
+        );
+        return account ? [account] : [];
+      })[0] ??
+    accounts.find((account) => String(account.redeem?.instanceId ?? "") === "codex") ??
+    accounts[0] ??
     null;
-  const activeAccount =
-    activeInstanceId === null
-      ? null
-      : (accounts.find(
-          (account) =>
-            account.redeem?.instanceId === activeInstanceId &&
-            account.redeem.environmentId === activeRunningThread?.environmentId,
-        ) ?? null);
   const visibleAccounts = expanded ? accounts : activeAccount ? [activeAccount] : [];
   const now = Date.now();
 
@@ -165,9 +167,7 @@ export function SidebarCodexLimitsSummary() {
         {accounts.length === 0 ? (
           <div className="text-[10px] text-muted-foreground">Refreshing subscription limitsâ€¦</div>
         ) : visibleAccounts.length === 0 ? (
-          <div className="text-[10px] text-muted-foreground">
-            No Codex session is running. Open to view all account limits.
-          </div>
+          <div className="text-[10px] text-muted-foreground">No Codex limits available.</div>
         ) : (
           visibleAccounts.map((account) => {
             const identity = codexAccountPresentation(
