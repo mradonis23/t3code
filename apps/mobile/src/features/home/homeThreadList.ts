@@ -2,6 +2,7 @@ import {
   buildProjectGroups,
   derivePhysicalProjectKey,
   deriveProjectGroupLabel,
+  deriveProjectHierarchyPresentation,
 } from "@t3tools/client-runtime/state/project-grouping";
 import type {
   EnvironmentProject,
@@ -35,6 +36,13 @@ export interface HomeProjectScope {
   readonly representative: EnvironmentProject;
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly projectRefs: ReadonlyArray<ScopedProjectRef>;
+  readonly hierarchy: {
+    readonly portfolioKey: string;
+    readonly portfolioLabel: string;
+    readonly repositoryKey: string;
+    readonly repositoryLabel: string;
+    readonly workspaceLabel: string;
+  } | null;
 }
 
 function getProjectSortTimestamp(
@@ -63,12 +71,17 @@ export function buildHomeProjectScopes(input: {
       sidebarProjectGroupingOverrides: {},
     },
   }).map((group) => {
+    const hierarchy =
+      input.projectGroupingMode === "hierarchy"
+        ? deriveProjectHierarchyPresentation(group.representative)
+        : null;
     return {
       key: group.key,
-      title: group.label,
+      title: hierarchy?.workspaceLabel ?? group.label,
       representative: group.representative,
       projects: group.members.map((member) => member.project),
       projectRefs: group.memberProjectRefs,
+      hierarchy,
     };
   });
 }
@@ -79,6 +92,11 @@ export function sortHomeProjectScopes(input: {
   readonly pendingTasks: ReadonlyArray<PendingNewTask>;
   readonly projectSortOrder: HomeProjectSortOrder;
 }): ReadonlyArray<HomeProjectScope> {
+  if (input.projectSortOrder === "alphabetical") {
+    return [...input.scopes].toSorted(
+      (left, right) => left.title.localeCompare(right.title) || left.key.localeCompare(right.key),
+    );
+  }
   const scopeKeyByProjectRef = new Map(
     input.scopes.flatMap((scope) =>
       scope.projectRefs.map(
@@ -147,6 +165,7 @@ export interface HomeThreadGroup {
   readonly key: string;
   readonly title: string;
   readonly representative: EnvironmentProject;
+  readonly hierarchy: HomeProjectScope["hierarchy"];
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly pendingTasks: ReadonlyArray<PendingNewTask>;
   /** Full sorted thread history for the group (revealed when expanded / searching). */
@@ -216,10 +235,12 @@ export function buildHomeThreadGroups(input: {
   const now = input.now ?? Date.now();
   const groups = new Map<string, MutableHomeThreadGroup>();
   const groupTitleByKey = new Map<string, string>();
+  const groupHierarchyByKey = new Map<string, HomeProjectScope["hierarchy"]>();
   const groupKeyByProjectKey = new Map<string, string>();
 
   for (const scope of buildHomeProjectScopes(input)) {
     groupTitleByKey.set(scope.key, scope.title);
+    groupHierarchyByKey.set(scope.key, scope.hierarchy);
     groups.set(scope.key, {
       key: scope.key,
       projects: [...scope.projects],
@@ -359,6 +380,7 @@ export function buildHomeThreadGroups(input: {
       key: group.key,
       title,
       representative,
+      hierarchy: groupHierarchyByKey.get(group.key) ?? null,
       projects: group.projects,
       pendingTasks: matchingPendingTasks,
       threads: sortedThreads,
@@ -367,6 +389,39 @@ export function buildHomeThreadGroups(input: {
         ? null
         : (lastActiveProject ?? representative),
     });
+  }
+
+  if (input.projectGroupingMode === "hierarchy") {
+    return [...result].toSorted((left, right) => {
+      const leftHierarchy = left.hierarchy;
+      const rightHierarchy = right.hierarchy;
+      if (leftHierarchy && rightHierarchy) {
+        const byPortfolio = leftHierarchy.portfolioLabel.localeCompare(
+          rightHierarchy.portfolioLabel,
+        );
+        if (byPortfolio !== 0) return byPortfolio;
+        const byRepository = leftHierarchy.repositoryLabel.localeCompare(
+          rightHierarchy.repositoryLabel,
+        );
+        if (byRepository !== 0) return byRepository;
+      } else if (leftHierarchy || rightHierarchy) {
+        return leftHierarchy ? -1 : 1;
+      }
+
+      if (input.projectSortOrder === "alphabetical") {
+        return left.title.localeCompare(right.title) || left.key.localeCompare(right.key);
+      }
+      const rightTimestamp = groupSortTimestamp(right, input.projectSortOrder);
+      const leftTimestamp = groupSortTimestamp(left, input.projectSortOrder);
+      if (rightTimestamp !== leftTimestamp) return rightTimestamp > leftTimestamp ? 1 : -1;
+      return left.title.localeCompare(right.title) || left.key.localeCompare(right.key);
+    });
+  }
+
+  if (input.projectSortOrder === "alphabetical") {
+    return [...result].toSorted(
+      (left, right) => left.title.localeCompare(right.title) || left.key.localeCompare(right.key),
+    );
   }
 
   return Arr.sort(

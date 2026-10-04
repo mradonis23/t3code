@@ -37,7 +37,7 @@ import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2Enabled } from "../threads/use-thread-list-v2-enabled";
 import { environmentServerConfigsAtom } from "../../state/server";
-import { AccountLimits } from "../usage/UsageLimitsSection";
+import { AccountLimits, ResetCredits } from "../usage/UsageLimitsSection";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import {
   PendingTaskListRow,
@@ -212,7 +212,7 @@ export function HomeScreen(props: HomeScreenProps) {
     ReadonlyMap<string, HomeGroupDisplayState>
   >(() => new Map());
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
-  const threadListV2Enabled = useThreadListV2Enabled();
+  const threadListV2Enabled = useThreadListV2Enabled() && props.projectGroupingMode !== "hierarchy";
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const listRef = useRef<LegendListRef | null>(null);
@@ -926,22 +926,38 @@ export function HomeScreen(props: HomeScreenProps) {
       switch (item.type) {
         case "header":
           return (
-            <ThreadListGroupHeader
-              variant="compact"
-              collapsed={item.collapsed}
-              isFirst={item.isFirst}
-              groupKey={item.group.key}
-              onGroupAction={updateGroupDisplay}
-              // Aggregated groups (same repo across machines) have no single
-              // target project, and `pending-project:` groups hold a placeholder
-              // built from queued-task metadata rather than a real project shell,
-              // so the quick new-thread button is single-real-project only.
-              newThreadTarget={item.group.newThreadTarget}
-              onNewThread={props.onNewThreadInProject}
-              project={item.group.representative}
-              threadCount={item.group.threads.length + item.group.pendingTasks.length}
-              title={item.group.title}
-            />
+            <View className="bg-screen">
+              {item.showPortfolioLabel && item.group.hierarchy ? (
+                <Text className="px-5 pt-3 pb-1 text-xs font-t3-bold uppercase tracking-[0.7px] text-foreground-tertiary">
+                  {item.group.hierarchy.portfolioLabel}
+                </Text>
+              ) : null}
+              {item.showRepositoryLabel && item.group.hierarchy ? (
+                <View className="mx-5 flex-row items-center gap-1.5 border-l border-border-subtle pl-3 pt-1">
+                  <Text className="text-sm font-t3-bold text-foreground-secondary">
+                    {item.group.hierarchy.repositoryLabel}
+                  </Text>
+                </View>
+              ) : null}
+              <View className={item.group.hierarchy ? "ml-3 border-l border-border-subtle" : ""}>
+                <ThreadListGroupHeader
+                  variant="compact"
+                  collapsed={item.collapsed}
+                  isFirst={item.isFirst && !item.group.hierarchy}
+                  groupKey={item.group.key}
+                  onGroupAction={updateGroupDisplay}
+                  // Aggregated groups (same repo across machines) have no single
+                  // target project, and `pending-project:` groups hold a placeholder
+                  // built from queued-task metadata rather than a real project shell,
+                  // so the quick new-thread button is single-real-project only.
+                  newThreadTarget={item.group.newThreadTarget}
+                  onNewThread={props.onNewThreadInProject}
+                  project={item.group.representative}
+                  threadCount={item.group.threads.length + item.group.pendingTasks.length}
+                  title={item.group.title}
+                />
+              </View>
+            </View>
           );
         case "pending-task":
           return (
@@ -1138,6 +1154,18 @@ export function HomeScreen(props: HomeScreenProps) {
               limits={provider.usageLimits}
               now={Date.now()}
               colorOverride={account.color}
+              footer={
+                provider.usageLimits?.resetCredits ? (
+                  <ResetCredits
+                    environmentId={environmentId}
+                    instanceId={provider.instanceId}
+                    credits={provider.usageLimits.resetCredits}
+                    now={Date.now()}
+                    dense
+                    colorOverride={account.color}
+                  />
+                ) : undefined
+              }
             />
           );
         })}

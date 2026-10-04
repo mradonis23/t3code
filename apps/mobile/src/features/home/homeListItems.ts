@@ -25,6 +25,8 @@ export interface HomeHeaderListItem {
   readonly group: HomeThreadGroup;
   readonly collapsed: boolean;
   readonly isFirst: boolean;
+  readonly showPortfolioLabel: boolean;
+  readonly showRepositoryLabel: boolean;
 }
 
 export interface HomeThreadListItem {
@@ -94,7 +96,9 @@ export function homeListItemsAreEqual(previous: HomeListItem, item: HomeListItem
         previous.type === "header" &&
         previous.group === item.group &&
         previous.collapsed === item.collapsed &&
-        previous.isFirst === item.isFirst
+        previous.isFirst === item.isFirst &&
+        previous.showPortfolioLabel === item.showPortfolioLabel &&
+        previous.showRepositoryLabel === item.showRepositoryLabel
       );
     case "pending-task":
       return (
@@ -128,19 +132,32 @@ export function buildHomeListLayout(input: {
 }): HomeListLayout {
   const items: HomeListItem[] = [];
   const stickyHeaderIndices: number[] = [];
+  let previousHierarchy: HomeThreadGroup["hierarchy"] = null;
 
   for (const [groupIndex, group] of input.groups.entries()) {
     const display = input.displayStates.get(group.key) ?? DEFAULT_GROUP_DISPLAY_STATE;
     const collapsed = display.collapsed && input.showAllThreads !== true;
 
     stickyHeaderIndices.push(items.length);
+    const showPortfolioLabel =
+      group.hierarchy !== null &&
+      (previousHierarchy === null ||
+        previousHierarchy.portfolioKey !== group.hierarchy.portfolioKey);
+    const showRepositoryLabel =
+      group.hierarchy !== null &&
+      (showPortfolioLabel ||
+        previousHierarchy === null ||
+        previousHierarchy.repositoryKey !== group.hierarchy.repositoryKey);
     items.push({
       type: "header",
       key: `header:${group.key}`,
       group,
       collapsed,
       isFirst: groupIndex === 0,
+      showPortfolioLabel,
+      showRepositoryLabel,
     });
+    previousHierarchy = group.hierarchy;
 
     if (collapsed) {
       continue;

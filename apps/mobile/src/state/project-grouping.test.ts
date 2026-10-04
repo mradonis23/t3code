@@ -7,7 +7,7 @@ import {
 
 describe("mobile project grouping preferences", () => {
   it("maps the legacy boolean while preferring the new mode", () => {
-    expect(resolveMobileProjectGroupingSettings({}).sidebarProjectGroupingMode).toBe("repository");
+    expect(resolveMobileProjectGroupingSettings({}).sidebarProjectGroupingMode).toBe("hierarchy");
     expect(
       resolveMobileProjectGroupingSettings({ projectGroupingEnabled: false })
         .sidebarProjectGroupingMode,

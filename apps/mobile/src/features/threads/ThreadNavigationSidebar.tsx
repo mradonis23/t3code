@@ -161,7 +161,7 @@ function ThreadNavigationSidebarPane(
     movePinnedThread,
     regenerateThreadTitle,
   } = useThreadListActions();
-  const threadListV2Enabled = useThreadListV2Enabled();
+  const threadListV2PreferenceEnabled = useThreadListV2Enabled();
   const pendingTasks = usePendingNewTasks();
   const { openPendingTask, confirmDeletePendingTask } = usePendingTaskListActions();
   const environments = useMemo(
@@ -180,6 +180,8 @@ function ThreadNavigationSidebarPane(
   );
   const { options, setSelectedEnvironmentId, setProjectSortOrder, setThreadSortOrder } =
     useHomeListOptions(availableEnvironmentIds);
+  const threadListV2Enabled =
+    threadListV2PreferenceEnabled && options.projectGroupingMode !== "hierarchy";
   const searchEnvironmentIds = useMemo(
     () =>
       options.selectedEnvironmentId === null
@@ -223,7 +225,9 @@ function ThreadNavigationSidebarPane(
     () =>
       projectScopes.map((scope) => ({
         key: scope.key,
-        label: scope.title,
+        label: scope.hierarchy
+          ? `${scope.hierarchy.portfolioLabel} / ${scope.hierarchy.repositoryLabel} / ${scope.hierarchy.workspaceLabel}`
+          : scope.title,
       })),
     [projectScopes],
   );
@@ -947,21 +951,37 @@ function ThreadNavigationSidebarPane(
           );
         case "header":
           return (
-            <ThreadListGroupHeader
-              variant="sidebar"
-              collapsed={item.collapsed}
-              isFirst={item.isFirst}
-              groupKey={item.group.key}
-              onGroupAction={updateGroupDisplay}
-              // Same gating as the compact Home list: aggregated groups have no
-              // single target project, and pending-project groups hold a
-              // placeholder shell rather than a real project.
-              newThreadTarget={item.group.newThreadTarget}
-              onNewThread={props.onNewThreadInProject}
-              project={item.group.representative}
-              threadCount={item.group.threads.length + item.group.pendingTasks.length}
-              title={item.group.title}
-            />
+            <View>
+              {item.showPortfolioLabel && item.group.hierarchy ? (
+                <Text className="px-3 pt-3 pb-1 text-[10px] font-t3-bold uppercase tracking-[0.7px] text-foreground-tertiary">
+                  {item.group.hierarchy.portfolioLabel}
+                </Text>
+              ) : null}
+              {item.showRepositoryLabel && item.group.hierarchy ? (
+                <View className="mx-3 flex-row items-center border-l border-border-subtle pl-2 py-1">
+                  <Text className="text-xs font-t3-bold text-foreground-secondary">
+                    {item.group.hierarchy.repositoryLabel}
+                  </Text>
+                </View>
+              ) : null}
+              <View className={item.group.hierarchy ? "ml-2 border-l border-border-subtle" : ""}>
+                <ThreadListGroupHeader
+                  variant="sidebar"
+                  collapsed={item.collapsed}
+                  isFirst={item.isFirst && !item.group.hierarchy}
+                  groupKey={item.group.key}
+                  onGroupAction={updateGroupDisplay}
+                  // Same gating as the compact Home list: aggregated groups have no
+                  // single target project, and pending-project groups hold a
+                  // placeholder shell rather than a real project.
+                  newThreadTarget={item.group.newThreadTarget}
+                  onNewThread={props.onNewThreadInProject}
+                  project={item.group.representative}
+                  threadCount={item.group.threads.length + item.group.pendingTasks.length}
+                  title={item.group.title}
+                />
+              </View>
+            </View>
           );
         case "pending-task":
           return (

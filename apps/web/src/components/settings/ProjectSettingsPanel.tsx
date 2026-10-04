@@ -121,6 +121,7 @@ const ProjectIconPickerDialog = lazy(() =>
 );
 
 export const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
+  hierarchy: "Repository → workspace",
   repository: "Group by repository",
   repository_path: "Group by repository path",
   separate: "Keep separate",
@@ -1242,6 +1243,7 @@ function ProjectDetail({
                 onValueChange={(value) => {
                   if (
                     value === "inherit" ||
+                    value === "hierarchy" ||
                     value === "repository" ||
                     value === "repository_path" ||
                     value === "separate"
@@ -1260,6 +1262,9 @@ function ProjectDetail({
                 <SelectPopup align="end" alignItemWithTrigger={false}>
                   <SelectItem hideIndicator value="inherit">
                     Use global default
+                  </SelectItem>
+                  <SelectItem hideIndicator value="hierarchy">
+                    {PROJECT_GROUPING_MODE_LABELS.hierarchy}
                   </SelectItem>
                   <SelectItem hideIndicator value="repository">
                     {PROJECT_GROUPING_MODE_LABELS.repository}

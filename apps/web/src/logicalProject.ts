@@ -3,6 +3,7 @@ export {
   deriveLogicalProjectKey,
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKey,
+  deriveProjectHierarchyPresentation,
   derivePhysicalProjectKeyFromPath,
   deriveProjectGroupingOverrideKey,
   getProjectOrderKey,

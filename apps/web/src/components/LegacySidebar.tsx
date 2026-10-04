@@ -208,17 +208,20 @@ import type { SidebarThreadSummary } from "../types";
 import {
   buildPhysicalToLogicalProjectKeyMap,
   buildSidebarProjectSnapshots,
+  groupSidebarProjectsByHierarchy,
   type SidebarProjectGroupMember,
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
-  updated_at: "Last user message",
+  updated_at: "Recent activity",
   created_at: "Created at",
+  alphabetical: "Alphabetical A-Z",
   manual: "Manual",
 };
 const SIDEBAR_THREAD_SORT_LABELS: Record<SidebarThreadSortOrder, string> = {
-  updated_at: "Last user message",
+  updated_at: "Recent activity",
   created_at: "Created at",
+  alphabetical: "Alphabetical A-Z",
 };
 const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
@@ -226,6 +229,7 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
 } as const;
 const EMPTY_THREAD_JUMP_LABELS = new Map<string, string>();
 const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
+  hierarchy: "Repository → workspace",
   repository: "Group by repository",
   repository_path: "Group by repository path",
   separate: "Keep separate",
@@ -268,6 +272,8 @@ function projectExpansionPreferenceKeys(project: SidebarProjectSnapshot): string
 
 function projectGroupingModeDescription(mode: SidebarProjectGroupingMode): string {
   switch (mode) {
+    case "hierarchy":
+      return "Organize work as portfolio → repository → workspace → thread.";
     case "repository":
       return "Projects from the same repository share one sidebar row.";
     case "repository_path":
@@ -2499,6 +2505,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 onValueChange={(value) => {
                   if (
                     value === "inherit" ||
+                    value === "hierarchy" ||
                     value === "repository" ||
                     value === "repository_path" ||
                     value === "separate"
@@ -2517,6 +2524,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                 <SelectPopup align="end" alignItemWithTrigger={false}>
                   <SelectItem hideIndicator value="inherit">
                     Use global default
+                  </SelectItem>
+                  <SelectItem hideIndicator value="hierarchy">
+                    {PROJECT_GROUPING_MODE_LABELS.hierarchy}
                   </SelectItem>
                   <SelectItem hideIndicator value="repository">
                     {PROJECT_GROUPING_MODE_LABELS.repository}
@@ -2894,6 +2904,47 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     [updateSettings],
   );
 
+  const hierarchyGroups = useMemo(
+    () => groupSidebarProjectsByHierarchy(sortedProjects),
+    [sortedProjects],
+  );
+  const hierarchyProjectCount = hierarchyGroups.reduce(
+    (total, portfolio) =>
+      total +
+      portfolio.repositories.reduce(
+        (repositoryTotal, repository) => repositoryTotal + repository.projects.length,
+        0,
+      ),
+    0,
+  );
+  const showHierarchy =
+    !isManualProjectSorting &&
+    sortedProjects.length > 0 &&
+    hierarchyProjectCount === sortedProjects.length;
+
+  const renderProjectRow = (project: SidebarProjectSnapshot) => (
+    <SidebarProjectListRow
+      key={project.projectKey}
+      project={project}
+      isThreadListExpanded={expandedThreadListsByProject.has(project.projectKey)}
+      activeRouteThreadKey={activeRouteProjectKey === project.projectKey ? routeThreadKey : null}
+      openPullRequestsInRightPanel={openPullRequestsInRightPanel}
+      newThreadShortcutLabel={newThreadShortcutLabel}
+      handleNewThread={handleNewThread}
+      archiveThread={archiveThread}
+      deleteThread={deleteThread}
+      threadJumpLabelByKey={threadJumpLabelByKey}
+      attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
+      expandThreadListForProject={expandThreadListForProject}
+      collapseThreadListForProject={collapseThreadListForProject}
+      dragInProgressRef={dragInProgressRef}
+      suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
+      suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
+      isManualProjectSorting={isManualProjectSorting}
+      dragHandleProps={null}
+    />
+  );
+
   return (
     <SidebarContent
       className="gap-0"
@@ -3026,32 +3077,30 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
               </SortableContext>
             </SidebarMenu>
           </DndContext>
+        ) : showHierarchy ? (
+          <div ref={attachProjectListAutoAnimateRef} className="grid gap-3">
+            {hierarchyGroups.map((portfolio) => (
+              <section key={portfolio.key} aria-label={portfolio.label} className="grid gap-1">
+                <div className="px-2 pt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-sidebar-muted-foreground/70">
+                  {portfolio.label}
+                </div>
+                {portfolio.repositories.map((repository) => (
+                  <div key={repository.key} className="grid gap-0.5">
+                    <div className="flex items-center gap-1.5 px-2 py-1 text-xs font-semibold text-sidebar-foreground/85">
+                      <ChevronRightIcon className="size-3 text-icon-muted" aria-hidden="true" />
+                      <span className="truncate">{repository.label}</span>
+                    </div>
+                    <SidebarMenu className="ml-2 border-l border-sidebar-border/60 pl-1">
+                      {repository.projects.map((project) => renderProjectRow(project))}
+                    </SidebarMenu>
+                  </div>
+                ))}
+              </section>
+            ))}
+          </div>
         ) : (
           <SidebarMenu ref={attachProjectListAutoAnimateRef}>
-            {sortedProjects.map((project) => (
-              <SidebarProjectListRow
-                key={project.projectKey}
-                project={project}
-                isThreadListExpanded={expandedThreadListsByProject.has(project.projectKey)}
-                activeRouteThreadKey={
-                  activeRouteProjectKey === project.projectKey ? routeThreadKey : null
-                }
-                openPullRequestsInRightPanel={openPullRequestsInRightPanel}
-                newThreadShortcutLabel={newThreadShortcutLabel}
-                handleNewThread={handleNewThread}
-                archiveThread={archiveThread}
-                deleteThread={deleteThread}
-                threadJumpLabelByKey={threadJumpLabelByKey}
-                attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
-                expandThreadListForProject={expandThreadListForProject}
-                collapseThreadListForProject={collapseThreadListForProject}
-                dragInProgressRef={dragInProgressRef}
-                suppressProjectClickAfterDragRef={suppressProjectClickAfterDragRef}
-                suppressProjectClickForContextMenuRef={suppressProjectClickForContextMenuRef}
-                isManualProjectSorting={isManualProjectSorting}
-                dragHandleProps={null}
-              />
-            ))}
+            {sortedProjects.map((project) => renderProjectRow(project))}
           </SidebarMenu>
         )}
 

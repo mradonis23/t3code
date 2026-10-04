@@ -422,7 +422,12 @@ export function ProjectDefaultsSettings({
             <Select
               value={clientSettings.sidebarProjectGroupingMode}
               onValueChange={(value) => {
-                if (value === "repository" || value === "repository_path" || value === "separate")
+                if (
+                  value === "hierarchy" ||
+                  value === "repository" ||
+                  value === "repository_path" ||
+                  value === "separate"
+                )
                   void updateClientSettings({ sidebarProjectGroupingMode: value });
               }}
             >
@@ -432,6 +437,7 @@ export function ProjectDefaultsSettings({
                 </SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem value="hierarchy">{PROJECT_GROUPING_MODE_LABELS.hierarchy}</SelectItem>
                 <SelectItem value="repository">
                   {PROJECT_GROUPING_MODE_LABELS.repository}
                 </SelectItem>

@@ -1,5 +1,10 @@
 import type { EnvironmentId, ScopedProjectRef } from "@t3tools/contracts";
-import { buildProjectGroups, type ProjectGroupingSettings } from "./logicalProject";
+import {
+  buildProjectGroups,
+  deriveProjectHierarchyPresentation,
+  resolveProjectGroupingMode,
+  type ProjectGroupingSettings,
+} from "./logicalProject";
 import type { Project } from "./types";
 
 export type EnvironmentPresence = "local-only" | "remote-only" | "mixed";
@@ -23,12 +28,79 @@ export interface SidebarProjectSnapshot extends Project {
   memberProjects: readonly SidebarProjectGroupMember[];
   memberProjectRefs: readonly ScopedProjectRef[];
   remoteEnvironmentLabels: readonly string[];
+  hierarchy: {
+    readonly portfolioKey: string;
+    readonly portfolioLabel: string;
+    readonly repositoryKey: string;
+    readonly repositoryLabel: string;
+    readonly workspaceLabel: string;
+    readonly isMainWorkspace: boolean;
+  } | null;
 }
 
 export interface SidebarProjectPickerEntry {
   group: SidebarProjectSnapshot;
   targetProject: SidebarProjectGroupMember;
   isPreferred: boolean;
+}
+
+export interface SidebarHierarchyRepository {
+  readonly key: string;
+  readonly label: string;
+  readonly projects: readonly SidebarProjectSnapshot[];
+}
+
+export interface SidebarHierarchyPortfolio {
+  readonly key: string;
+  readonly label: string;
+  readonly repositories: readonly SidebarHierarchyRepository[];
+}
+
+/**
+ * Presentation-only hierarchy. Input order is preserved inside each repository,
+ * so the user's Recent/Created/Manual workspace sort continues to apply there.
+ * Portfolio and repository buckets are alphabetical for predictable navigation.
+ */
+export function groupSidebarProjectsByHierarchy(
+  projects: readonly SidebarProjectSnapshot[],
+): readonly SidebarHierarchyPortfolio[] {
+  const portfolios = new Map<
+    string,
+    {
+      label: string;
+      repositories: Map<string, { label: string; projects: SidebarProjectSnapshot[] }>;
+    }
+  >();
+
+  for (const project of projects) {
+    const hierarchy = project.hierarchy;
+    if (!hierarchy) continue;
+    let portfolio = portfolios.get(hierarchy.portfolioKey);
+    if (!portfolio) {
+      portfolio = { label: hierarchy.portfolioLabel, repositories: new Map() };
+      portfolios.set(hierarchy.portfolioKey, portfolio);
+    }
+    let repository = portfolio.repositories.get(hierarchy.repositoryKey);
+    if (!repository) {
+      repository = { label: hierarchy.repositoryLabel, projects: [] };
+      portfolio.repositories.set(hierarchy.repositoryKey, repository);
+    }
+    repository.projects.push(project);
+  }
+
+  return [...portfolios.entries()]
+    .sort(([, left], [, right]) => left.label.localeCompare(right.label))
+    .map(([portfolioKey, portfolio]) => ({
+      key: portfolioKey,
+      label: portfolio.label,
+      repositories: [...portfolio.repositories.entries()]
+        .sort(([, left], [, right]) => left.label.localeCompare(right.label))
+        .map(([repositoryKey, repository]) => ({
+          key: repositoryKey,
+          label: repository.label,
+          projects: repository.projects,
+        })),
+    }));
 }
 
 export function buildPhysicalToLogicalProjectKeyMap(input: {
@@ -98,11 +170,14 @@ export function buildSidebarProjectSnapshots(input: {
     const allRemoteMembersAreDesktopLocal =
       remoteMembers.length > 0 &&
       remoteMembers.every((member) => isDesktopLocal(member.environmentId));
+    const groupingMode = resolveProjectGroupingMode(representative, input.settings);
+    const hierarchy =
+      groupingMode === "hierarchy" ? deriveProjectHierarchyPresentation(representative) : null;
 
     return {
       ...representative,
       projectKey: group.key,
-      displayName: group.label,
+      displayName: hierarchy?.workspaceLabel ?? group.label,
       groupedProjectCount: members.length,
       environmentPresence:
         hasLocal && hasRemote ? "mixed" : hasRemote ? "remote-only" : "local-only",
@@ -110,6 +185,7 @@ export function buildSidebarProjectSnapshots(input: {
       memberProjects: members,
       memberProjectRefs: group.memberProjectRefs,
       remoteEnvironmentLabels,
+      hierarchy,
     };
   });
 }

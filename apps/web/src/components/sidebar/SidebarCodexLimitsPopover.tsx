@@ -8,7 +8,12 @@ import { useAtomValue } from "@effect/atom-react";
 import { GaugeIcon, LoaderIcon, RefreshCwIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
-import type { EnvironmentId, ServerProvider } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  ProviderInstanceId,
+  ServerProvider,
+  ServerProviderResetCredits,
+} from "@t3tools/contracts";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import { useEnvironments } from "../../state/environments";
 import { useThreadShells } from "../../state/entities";
@@ -16,7 +21,13 @@ import { environmentPresentations } from "../../state/presentation";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
-import { LimitWindows, ResetCredits } from "../usage/UsageLimits";
+import {
+  LimitWindows,
+  ResetCreditDialog,
+  ResetCredits,
+  resetCreditsSummary,
+  useResetCredit,
+} from "../usage/UsageLimits";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
@@ -41,6 +52,61 @@ function codexAccountPresentation(instanceId: string): {
     default:
       return { label: "Dad's Codex", color: "#0A84FF" };
   }
+}
+
+function SidebarResetCreditPill({
+  environmentId,
+  instanceId,
+  credits,
+  now,
+  color,
+  accountLabel,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly instanceId: ProviderInstanceId;
+  readonly credits: ServerProviderResetCredits;
+  readonly now: number;
+  readonly color: string;
+  readonly accountLabel: string;
+}) {
+  const { confirming, setConfirming, busy, status, redeem } = useResetCredit(
+    environmentId,
+    instanceId,
+  );
+  if (credits.availableCount === 0 && status === null) return null;
+
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+      {credits.availableCount > 0 ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => setConfirming(true)}
+          className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full border px-2 text-[9px] font-semibold tabular-nums transition-opacity hover:opacity-80 disabled:opacity-50"
+          style={{
+            borderColor: `${color}80`,
+            backgroundColor: `${color}14`,
+            color,
+          }}
+          aria-label={`Use a reset credit for ${accountLabel}`}
+          title={resetCreditsSummary(credits, now)}
+        >
+          <RefreshCwIcon className={busy ? "size-2.5 animate-spin" : "size-2.5"} />
+          {busy
+            ? "Using…"
+            : `${credits.availableCount} reset${credits.availableCount === 1 ? "" : "s"}`}
+        </button>
+      ) : null}
+      {status ? (
+        <span className="min-w-0 text-[9px] leading-tight text-sidebar-foreground">{status}</span>
+      ) : null}
+      <ResetCreditDialog
+        open={confirming}
+        onOpenChange={setConfirming}
+        onConfirm={() => void redeem()}
+      />
+    </div>
+  );
 }
 
 function CodexLimitProviderCard({
@@ -77,7 +143,7 @@ function CodexLimitProviderCard({
           <div className="truncate text-[11px] text-muted-foreground">
             {[planLabel, showEnvironment ? entry.environmentLabel : null]
               .filter(Boolean)
-              .join(" Ã‚Â· ")}
+              .join(" - ")}
           </div>
         </div>
       </div>
@@ -165,39 +231,65 @@ export function SidebarCodexLimitsSummary() {
       </button>
       <div className="grid gap-1.5 border-t border-border/50 px-2.5 py-2">
         {accounts.length === 0 ? (
-          <div className="text-[10px] text-muted-foreground">Refreshing subscription limitsâ€¦</div>
+          <div className="text-[10px] text-muted-foreground">Refreshing subscription limits...</div>
         ) : visibleAccounts.length === 0 ? (
           <div className="text-[10px] text-muted-foreground">No Codex limits available.</div>
         ) : (
-          visibleAccounts.map((account) => {
+          visibleAccounts.map((account, index) => {
             const identity = codexAccountPresentation(
               String(account.redeem?.instanceId ?? "codex"),
             );
+            const resetCredits = account.limits.resetCredits;
             return (
-              <div key={account.key} className="grid gap-0.5">
+              <div
+                key={account.key}
+                className={
+                  index === 0 ? "grid gap-1" : "grid gap-1 border-t border-border/40 pt-1.5"
+                }
+              >
                 <div className="flex min-w-0 items-center gap-1.5">
                   <span
                     className="size-2 shrink-0 rounded-full"
                     style={{ backgroundColor: identity.color }}
                     aria-hidden="true"
                   />
-                  <div className="truncate text-[11px] font-medium text-sidebar-foreground">
+                  <div className="min-w-0 flex-1 text-[11px] font-semibold text-sidebar-foreground">
                     {identity.label}
                   </div>
+                  {account.redeem && resetCredits ? (
+                    <SidebarResetCreditPill
+                      environmentId={account.redeem.environmentId}
+                      instanceId={account.redeem.instanceId}
+                      credits={resetCredits}
+                      now={now}
+                      color={identity.color}
+                      accountLabel={identity.label}
+                    />
+                  ) : null}
                 </div>
-                <div className="truncate text-[10px] text-muted-foreground">
-                  {[account.email, account.plan].filter(Boolean).join(" Â· ")}
-                </div>
-                <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] tabular-nums text-muted-foreground">
-                  {account.limits.windows.map((window) => (
-                    <span key={window.id}>
-                      {window.label}:{" "}
-                      <strong className="font-semibold text-sidebar-foreground">
-                        {remainingPercent(window)}%
-                      </strong>
-                      {formatResetsIn(window, now) ? ` Â· ${formatResetsIn(window, now)}` : ""}
-                    </span>
-                  ))}
+                {account.email ? (
+                  <div className="break-all pl-3.5 text-[9px] leading-tight text-muted-foreground">
+                    {account.email}
+                  </div>
+                ) : null}
+                {account.plan ? (
+                  <div className="pl-3.5 text-[9px] leading-tight text-muted-foreground">
+                    {account.plan}
+                  </div>
+                ) : null}
+                <div className="grid gap-0.5 pl-3.5 text-[10px] tabular-nums text-muted-foreground">
+                  {account.limits.windows.map((window) => {
+                    const resetsIn = formatResetsIn(window, now);
+                    return (
+                      <div key={window.id} className="flex flex-wrap items-baseline gap-x-1">
+                        <span>{window.label}:</span>
+                        <strong className="font-semibold text-sidebar-foreground">
+                          {remainingPercent(window)}%
+                        </strong>
+                        {resetsIn ? <span>- {resetsIn}</span> : null}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             );

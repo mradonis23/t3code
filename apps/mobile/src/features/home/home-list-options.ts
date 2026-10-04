@@ -35,7 +35,8 @@ export const PROJECT_SORT_OPTIONS: ReadonlyArray<{
   readonly value: HomeProjectSortOrder;
   readonly label: string;
 }> = [
-  { value: "updated_at", label: "Last user message" },
+  { value: "updated_at", label: "Recent activity" },
+  { value: "alphabetical", label: "Alphabetical A-Z" },
   { value: "created_at", label: "Created at" },
 ];
 
@@ -43,7 +44,8 @@ export const THREAD_SORT_OPTIONS: ReadonlyArray<{
   readonly value: SidebarThreadSortOrder;
   readonly label: string;
 }> = [
-  { value: "updated_at", label: "Last user message" },
+  { value: "updated_at", label: "Recent activity" },
+  { value: "alphabetical", label: "Alphabetical A-Z" },
   { value: "created_at", label: "Created at" },
 ];
 
@@ -114,7 +116,7 @@ export function useHomeListOptions(availableEnvironmentIds: ReadonlySet<Environm
       : { ...options, selectedEnvironmentId };
   const resolvedOptions: ResolvedHomeListOptions = {
     ...availableOptions,
-    projectGroupingMode: shared?.projectGroupingMode ?? "repository",
+    projectGroupingMode: shared?.projectGroupingMode ?? "hierarchy",
   };
 
   const setSelectedEnvironmentId = useCallback((value: EnvironmentId | null) => {

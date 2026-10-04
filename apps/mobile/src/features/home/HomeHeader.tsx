@@ -1,4 +1,8 @@
-import type { EnvironmentId, SidebarThreadSortOrder } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  SidebarProjectGroupingMode,
+  SidebarThreadSortOrder,
+} from "@t3tools/contracts";
 import type { MenuAction } from "@react-native-menu/menu";
 import Constants from "expo-constants";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
@@ -42,6 +46,7 @@ export function HomeHeader(props: {
   readonly selectedEnvironmentId: EnvironmentId | null;
   readonly selectedProjectKey: string | null;
   readonly projectSortOrder: HomeProjectSortOrder;
+  readonly projectGroupingMode: SidebarProjectGroupingMode;
   readonly threadSortOrder: SidebarThreadSortOrder;
   readonly onSearchQueryChange: (query: string) => void;
   readonly onEnvironmentChange: (environmentId: EnvironmentId | null) => void;
@@ -71,7 +76,7 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
   // Thread List v2 lays the list out in fixed creation order, so the
   // sort/group filter controls would be silently ignored — hide them and
   // key the "customized" icon state off the environment filter alone.
-  const threadListV2Enabled = useThreadListV2Enabled();
+  const threadListV2Enabled = useThreadListV2Enabled() && props.projectGroupingMode !== "hierarchy";
   const hasCustomListOptions = threadListV2Enabled
     ? props.selectedEnvironmentId !== null || props.selectedProjectKey !== null
     : hasCustomHomeListOptions(props);
@@ -312,7 +317,7 @@ function IosHomeHeader(props: HomeHeaderProps) {
   // Thread List v2 lays the list out in fixed creation order, so the
   // sort/group filter controls would be silently ignored — hide them and
   // key the "customized" icon state off the environment filter alone.
-  const threadListV2Enabled = useThreadListV2Enabled();
+  const threadListV2Enabled = useThreadListV2Enabled() && props.projectGroupingMode !== "hierarchy";
   const hasCustomListOptions = threadListV2Enabled
     ? props.selectedEnvironmentId !== null || props.selectedProjectKey !== null
     : hasCustomHomeListOptions(props);

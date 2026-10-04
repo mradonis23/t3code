@@ -22,6 +22,11 @@ const GROUPING_OPTIONS: ReadonlyArray<{
   readonly description: string;
 }> = [
   {
+    mode: "hierarchy",
+    label: "Repository → workspace",
+    description: "Group work as portfolio, repository, workspace, then thread.",
+  },
+  {
     mode: "repository",
     label: "Group by repository",
     description: "Matching repositories appear as one project.",

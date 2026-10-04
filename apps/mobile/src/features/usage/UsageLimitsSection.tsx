@@ -179,8 +179,10 @@ export function ResetCredits(props: {
   readonly now: number;
   /** A smaller pill for the composer card. */
   readonly dense?: boolean;
+  /** Optional account identity color for the redeem pill. */
+  readonly colorOverride?: string;
 }) {
-  const { environmentId, instanceId, credits, now, dense = false } = props;
+  const { environmentId, instanceId, credits, now, dense = false, colorOverride } = props;
   const consume = useAtomCommand(serverEnvironment.consumeResetCredit, {
     reportFailure: false,
   });
@@ -239,6 +241,15 @@ export function ResetCredits(props: {
               ? "rounded-full bg-subtle-strong px-2.5 py-1"
               : "min-h-[44px] justify-center rounded-full bg-subtle-strong px-3 py-1.5"
           }
+          style={
+            colorOverride
+              ? {
+                  borderColor: `${colorOverride}80`,
+                  borderWidth: 1,
+                  backgroundColor: `${colorOverride}14`,
+                }
+              : undefined
+          }
         >
           <Text
             className={
@@ -246,6 +257,7 @@ export function ResetCredits(props: {
                 ? "text-xs font-t3-medium text-foreground"
                 : "text-sm font-t3-medium text-foreground"
             }
+            style={colorOverride ? { color: colorOverride } : undefined}
           >
             {busy ? "Using…" : "Use reset"}
           </Text>

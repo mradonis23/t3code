@@ -6,6 +6,7 @@ import { chooseLoadBalancedEnvironment } from "../load-balancing.ts";
 import {
   buildProjectGroups,
   derivePhysicalProjectKey,
+  deriveProjectHierarchyPresentation,
   type ProjectGroupingSettings,
 } from "./projectGrouping.ts";
 
@@ -115,6 +116,75 @@ function settings(
     sidebarProjectGroupingOverrides: overrides,
   };
 }
+
+describe("project hierarchy presentation", () => {
+  const serviceCrmIdentity = {
+    ...repositoryIdentity,
+    canonicalKey: "github.com/mradonis23/service_crm",
+    owner: "mradonis23",
+    name: "service_crm",
+    displayName: "mradonis23/service_crm",
+  };
+  const lightingIdentity = {
+    ...repositoryIdentity,
+    canonicalKey: "github.com/mradonis23/MPR-Lighting",
+    owner: "mradonis23",
+    name: "MPR-Lighting",
+    displayName: "mradonis23/MPR-Lighting",
+  };
+
+  it("maps CRM worktrees under the Service CRM repository", () => {
+    const project = makeProject(
+      "serviceops",
+      String.raw`F:\CRM\worktrees\codex-serviceops-unified-20261002`,
+      { repositoryIdentity: serviceCrmIdentity },
+    );
+    expect(deriveProjectHierarchyPresentation(project)).toEqual({
+      portfolioKey: "crm",
+      portfolioLabel: "CRM",
+      repositoryKey: "github.com/mradonis23/service_crm",
+      repositoryLabel: "Service CRM",
+      workspaceLabel: "ServiceOps Unified",
+      isMainWorkspace: false,
+    });
+  });
+
+  it("labels owner checkouts as Main and groups website worktrees under Websites", () => {
+    const main = makeProject("main", String.raw`F:\Website\MPR\mpr-feb`, {
+      repositoryIdentity: lightingIdentity,
+    });
+    const worktree = makeProject(
+      "dashboard",
+      String.raw`F:\Website\MPR\worktrees\mpr-dashboard-current-state-20260913`,
+      { repositoryIdentity: lightingIdentity },
+    );
+
+    expect(deriveProjectHierarchyPresentation(main)).toMatchObject({
+      portfolioLabel: "Websites",
+      repositoryLabel: "MPR Lighting",
+      workspaceLabel: "Main",
+      isMainWorkspace: true,
+    });
+    expect(deriveProjectHierarchyPresentation(worktree)).toMatchObject({
+      portfolioLabel: "Websites",
+      repositoryLabel: "MPR Lighting",
+      workspaceLabel: "Dashboard Current State",
+      isMainWorkspace: false,
+    });
+  });
+
+  it("keeps hierarchy workspaces physically distinct", () => {
+    const projects = [
+      makeProject("main", String.raw`F:\CRM\service_crm`, {
+        repositoryIdentity: serviceCrmIdentity,
+      }),
+      makeProject("mms", String.raw`F:\CRM\worktrees\codex-mms-transport-20261002`, {
+        repositoryIdentity: serviceCrmIdentity,
+      }),
+    ];
+    expect(buildProjectGroups({ projects, settings: settings("hierarchy") })).toHaveLength(2);
+  });
+});
 
 describe("buildProjectGroups", () => {
   it("preserves every physical clone as a selectable member in repository modes", () => {

@@ -37,6 +37,125 @@ function uniqueNonEmptyValues(values: ReadonlyArray<string | null | undefined>):
   return unique;
 }
 
+export interface ProjectHierarchyPresentation {
+  readonly portfolioKey: string;
+  readonly portfolioLabel: string;
+  readonly repositoryKey: string;
+  readonly repositoryLabel: string;
+  readonly workspaceLabel: string;
+  readonly isMainWorkspace: boolean;
+}
+
+const HIERARCHY_ACRONYMS = new Map<string, string>([
+  ["ai", "AI"],
+  ["api", "API"],
+  ["crm", "CRM"],
+  ["mms", "MMS"],
+  ["mpr", "MPR"],
+  ["pc", "PC"],
+  ["seo", "SEO"],
+  ["sms", "SMS"],
+  ["t3", "T3"],
+  ["ui", "UI"],
+  ["ux", "UX"],
+]);
+
+function humanizeHierarchyName(value: string): string {
+  return value
+    .trim()
+    .replace(/[_-]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => {
+      const lower = word.toLocaleLowerCase();
+      if (lower === "serviceops") return "ServiceOps";
+      return (
+        HIERARCHY_ACRONYMS.get(lower) ?? `${word.slice(0, 1).toLocaleUpperCase()}${word.slice(1)}`
+      );
+    })
+    .join(" ");
+}
+
+function hierarchyPathSegments(workspaceRoot: string): string[] {
+  const normalized = workspaceRoot.replaceAll("\\", "/").replace(/^\/+/, "");
+  const withoutDrive = normalized.replace(/^[A-Za-z]:\/+/, "");
+  return withoutDrive.split("/").filter(Boolean);
+}
+
+function portfolioSegmentForPath(workspaceRoot: string): string {
+  const segments = hierarchyPathSegments(workspaceRoot);
+  if (
+    segments.length >= 3 &&
+    segments[0]?.toLocaleLowerCase() === "mnt" &&
+    segments[1]?.length === 1
+  ) {
+    return segments[2] ?? "Projects";
+  }
+  return segments[0] ?? "Projects";
+}
+
+function portfolioLabelForSegment(segment: string): string {
+  const normalized = segment.trim().toLocaleLowerCase();
+  if (normalized === "website" || normalized === "websites") return "Websites";
+  return humanizeHierarchyName(segment);
+}
+
+function repositoryLabelForProject(
+  project: Pick<EnvironmentProject, "title" | "repositoryIdentity">,
+): string {
+  const raw =
+    project.repositoryIdentity?.name?.trim() ||
+    project.repositoryIdentity?.displayName?.trim().split(/[\\/]/).at(-1) ||
+    project.title;
+  return humanizeHierarchyName(raw);
+}
+
+function workspaceLabelForProject(project: Pick<EnvironmentProject, "workspaceRoot">): {
+  readonly label: string;
+  readonly isMain: boolean;
+} {
+  const segments = hierarchyPathSegments(project.workspaceRoot);
+  const worktreesIndex = segments.findIndex(
+    (segment) => segment.toLocaleLowerCase() === "worktrees",
+  );
+  if (worktreesIndex < 0) {
+    return { label: "Main", isMain: true };
+  }
+
+  const rawWorkspace = segments[worktreesIndex + 1] ?? segments.at(-1) ?? "Workspace";
+  const cleaned = rawWorkspace.replace(/^(?:codex|t3|mpr)-/i, "").replace(/-\d{8}(?:-\d+)?$/i, "");
+  return {
+    label: humanizeHierarchyName(cleaned || rawWorkspace),
+    isMain: false,
+  };
+}
+
+/**
+ * Human-oriented hierarchy metadata for project navigation. Repository identity
+ * remains authoritative; path-derived portfolio/workspace labels only improve
+ * presentation and never change the physical project target.
+ */
+export function deriveProjectHierarchyPresentation(
+  project: Pick<EnvironmentProject, "title" | "workspaceRoot" | "repositoryIdentity">,
+): ProjectHierarchyPresentation {
+  const portfolioSegment = portfolioSegmentForPath(project.workspaceRoot);
+  const portfolioLabel = portfolioLabelForSegment(portfolioSegment);
+  const repositoryLabel = repositoryLabelForProject(project);
+  const workspace = workspaceLabelForProject(project);
+  const repositoryKey =
+    project.repositoryIdentity?.canonicalKey?.trim() ||
+    `${portfolioLabel.toLocaleLowerCase()}:${repositoryLabel.toLocaleLowerCase()}`;
+
+  return {
+    portfolioKey: portfolioLabel.toLocaleLowerCase(),
+    portfolioLabel,
+    repositoryKey,
+    repositoryLabel,
+    workspaceLabel: workspace.label,
+    isMainWorkspace: workspace.isMain,
+  };
+}
+
 function deriveRepositoryRelativeProjectPath(
   project: Pick<EnvironmentProject, "workspaceRoot" | "repositoryIdentity">,
 ): string | null {
@@ -128,8 +247,8 @@ export function deriveLogicalProjectKey(
     readonly groupingMode?: SidebarProjectGroupingMode;
   },
 ): string {
-  const groupingMode = options?.groupingMode ?? "repository";
-  if (groupingMode === "separate") {
+  const groupingMode = options?.groupingMode ?? "hierarchy";
+  if (groupingMode === "separate" || groupingMode === "hierarchy") {
     return derivePhysicalProjectKey(project);
   }
 

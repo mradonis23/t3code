@@ -6,6 +6,7 @@ import * as Order from "effect/Order";
 export interface ThreadSortInput {
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly title?: string;
   readonly latestUserMessageAt?: string | null;
   readonly messages?: ReadonlyArray<{
     readonly createdAt: string;
@@ -121,6 +122,12 @@ export function sortThreads<T extends { readonly id: string } & ThreadSortInput>
   threads: readonly T[],
   sortOrder: SidebarThreadSortOrder,
 ): T[] {
+  if (sortOrder === "alphabetical") {
+    return [...threads].toSorted(
+      (left, right) =>
+        (left.title ?? "").localeCompare(right.title ?? "") || left.id.localeCompare(right.id),
+    );
+  }
   return Arr.sort(
     threads,
     Order.mapInput(

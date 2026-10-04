@@ -91,7 +91,9 @@ export function HomeRouteScreen() {
         projectGroupingMode: listOptions.projectGroupingMode,
       }).map((scope) => ({
         key: scope.key,
-        label: scope.title,
+        label: scope.hierarchy
+          ? `${scope.hierarchy.portfolioLabel} / ${scope.hierarchy.repositoryLabel} / ${scope.hierarchy.workspaceLabel}`
+          : scope.title,
       })),
     [listOptions.projectGroupingMode, projects, selectedEnvironmentId],
   );
@@ -161,6 +163,7 @@ export function HomeRouteScreen() {
           selectedEnvironmentId={selectedEnvironmentId}
           selectedProjectKey={selectedProjectKey}
           projectSortOrder={listOptions.projectSortOrder}
+          projectGroupingMode={listOptions.projectGroupingMode}
           threadSortOrder={listOptions.threadSortOrder}
           onEnvironmentChange={setSelectedEnvironmentId}
           onProjectChange={setSelectedProjectKey}

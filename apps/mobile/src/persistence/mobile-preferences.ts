@@ -159,6 +159,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   }
   if (
     parsed.projectGroupingMode === "repository" ||
+    parsed.projectGroupingMode === "hierarchy" ||
     parsed.projectGroupingMode === "repository_path" ||
     parsed.projectGroupingMode === "separate"
   ) {

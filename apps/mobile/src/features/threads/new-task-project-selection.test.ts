@@ -45,6 +45,7 @@ function makeScope(projects: ReadonlyArray<EnvironmentProject>): HomeProjectScop
     key: "github.com/t3tools/t3code",
     title: "T3 Code",
     representative: projects[0]!,
+    hierarchy: null,
     projects,
     projectRefs: projects.map((project) => ({
       environmentId: project.environmentId,
