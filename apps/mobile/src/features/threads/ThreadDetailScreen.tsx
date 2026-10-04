@@ -37,6 +37,7 @@ import {
   AppState,
   Keyboard,
   Platform,
+  Pressable,
   useWindowDimensions,
   View,
   type GestureResponderEvent,
@@ -58,10 +59,12 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
-import { collectProviderUsageLimits } from "@t3tools/shared/usageLimits";
+import { collectProviderUsageLimits, remainingPercent } from "@t3tools/shared/usageLimits";
+import { AppText as Text } from "../../components/AppText";
 import type { ComposerEditorHandle } from "../../components/ComposerEditor";
 import type { StatusTone } from "../../components/StatusPill";
 import type { DraftComposerAttachment } from "../../lib/composerImages";
+import { codexAccountPresentation } from "../../lib/codexAccountPresentation";
 import { CHAT_CONTENT_MAX_WIDTH, type LayoutVariant } from "../../lib/layout";
 import { IOS_NAV_BAR_HEIGHT } from "../../lib/layoutMetrics";
 import { scopedThreadKey } from "../../lib/scopedEntities";
@@ -379,11 +382,30 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     readonly threadKey: string;
     readonly now: number;
   } | null>(null);
+  const activeProviderInstanceId =
+    props.selectedThread.session?.providerInstanceId ??
+    props.selectedThread.modelSelection.instanceId;
+  const activeProvider =
+    props.serverConfig?.providers.find(
+      (provider) => provider.instanceId === activeProviderInstanceId,
+    ) ?? null;
+  const activeCodexAccount =
+    activeProvider?.driver === "codex" ? codexAccountPresentation(activeProvider.instanceId) : null;
+  const activeSessionWindow = activeProvider?.usageLimits?.windows.find(
+    (window) => window.label.toLowerCase() === "session",
+  );
+  const activeWeeklyWindow = activeProvider?.usageLimits?.windows.find(
+    (window) => window.label.toLowerCase() === "weekly",
+  );
+  const activeLimitsLabel =
+    activeCodexAccount && activeSessionWindow && activeWeeklyWindow
+      ? `${activeCodexAccount.label} · ${remainingPercent(activeSessionWindow)}% / ${remainingPercent(activeWeeklyWindow)}%`
+      : (activeCodexAccount?.label ?? null);
   // A pending approval or question is part of the key: once it is answered,
   // from this client or any other, the agent resumes and spends quota.
   const usageLimitsKey = [
     selectedThreadKey,
-    props.selectedThread.modelSelection.instanceId,
+    activeProviderInstanceId,
     props.selectedThread.latestTurn?.turnId ?? "",
     props.activePendingApproval?.requestId ?? props.activePendingUserInput?.requestId ?? "",
   ].join(":");
@@ -395,18 +417,13 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     () =>
       usageLimitsPanel !== null && usageLimitsPanel.key === usageLimitsKey
         ? collectProviderUsageLimits(
-            props.selectedThread.modelSelection.instanceId,
+            activeProviderInstanceId,
             props.serverConfig?.providers ?? [],
             props.serverConfig?.usageLimitSources ?? [],
             usageLimitsPanel.now,
           )
         : null,
-    [
-      props.selectedThread.modelSelection.instanceId,
-      props.serverConfig,
-      usageLimitsKey,
-      usageLimitsPanel,
-    ],
+    [activeProviderInstanceId, props.serverConfig, usageLimitsKey, usageLimitsPanel],
   );
   const showUsageLimits = useCallback(
     (report: UsageLimitsReport | null) =>
@@ -421,6 +438,15 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
       ),
     [selectedThreadKey, usageLimitsKey],
   );
+  const openThreadUsageLimits = useCallback(() => {
+    const report = collectProviderUsageLimits(
+      activeProviderInstanceId,
+      props.serverConfig?.providers ?? [],
+      props.serverConfig?.usageLimitSources ?? [],
+      Date.now(),
+    );
+    showUsageLimits(report);
+  }, [activeProviderInstanceId, props.serverConfig, showUsageLimits]);
   const dismissUsageLimits = useCallback(() => setUsageLimitsPanel(null), []);
   // A send may resolve after navigating away, so only the originating
   // thread's panel is cleared; a panel opened elsewhere in the meantime stays.
@@ -850,6 +876,29 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                 list's bottom inset, so any padding above the pill/composer
                 pushes the resting content floor up by the same amount. */}
             <View ref={composerOverlayRef} onLayout={onComposerLayout} className="w-full">
+              {activeProvider?.usageLimits && activeLimitsLabel && activeCodexAccount ? (
+                <View
+                  className="w-full self-center items-end px-4 pb-2"
+                  style={{ maxWidth: contentMaxWidth }}
+                >
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`${activeCodexAccount.label} limits`}
+                    accessibilityHint="Shows this thread account session and weekly limits"
+                    onPress={openThreadUsageLimits}
+                    className="min-h-10 flex-row items-center gap-2 rounded-full border bg-card px-3 py-2 active:bg-subtle"
+                    style={{ borderColor: activeCodexAccount.color }}
+                  >
+                    <View
+                      className="h-2.5 w-2.5 rounded-full"
+                      style={{ backgroundColor: activeCodexAccount.color }}
+                    />
+                    <Text className="text-xs font-t3-medium text-foreground" numberOfLines={1}>
+                      {activeLimitsLabel}
+                    </Text>
+                  </Pressable>
+                </View>
+              ) : null}
               <FloatingWorkingControl
                 colorScheme={isDarkMode ? "dark" : "light"}
                 status={floatingStatus}
