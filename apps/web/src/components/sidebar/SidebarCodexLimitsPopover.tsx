@@ -1,10 +1,17 @@
-import { formatResetsIn, limitsNotice, remainingPercent } from "@t3tools/shared/usageLimits";
+import {
+  collectLimitAccounts,
+  formatResetsIn,
+  limitsNotice,
+  remainingPercent,
+} from "@t3tools/shared/usageLimits";
+import { useAtomValue } from "@effect/atom-react";
 import { GaugeIcon, LoaderIcon, RefreshCwIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
 import type { EnvironmentId, ServerProvider } from "@t3tools/contracts";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import { useEnvironments } from "../../state/environments";
+import { environmentPresentations } from "../../state/presentation";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
@@ -53,7 +60,7 @@ function CodexLimitProviderCard({
           <div className="truncate text-[11px] text-muted-foreground">
             {[planLabel, showEnvironment ? entry.environmentLabel : null]
               .filter(Boolean)
-              .join(" · ")}
+              .join(" Â· ")}
           </div>
         </div>
       </div>
@@ -84,43 +91,30 @@ function CodexLimitProviderCard({
  * command so desktop, web, and mobile never disagree about the account state.
  */
 export function SidebarCodexLimitsSummary() {
-  const { environments } = useEnvironments();
-  const entries = useMemo<ReadonlyArray<CodexLimitEntry>>(
-    () =>
-      environments.flatMap((environment) =>
-        deriveProviderInstanceEntries(environment.serverConfig?.providers ?? []).flatMap(
-          (providerEntry) => {
-            const provider = providerEntry.snapshot;
-            if (String(providerEntry.driverKind) !== "codex" || !provider.usageLimits) return [];
-            return [
-              {
-                environmentId: environment.environmentId,
-                environmentLabel: environment.label,
-                accountLabel: providerEntry.displayName,
-                provider,
-              },
-            ];
-          },
-        ),
-      ),
-    [environments],
+  const presentations = useAtomValue(environmentPresentations.presentationsAtom);
+  const accounts = collectLimitAccounts(presentations).filter(
+    (account) => account.driver === "codex",
   );
-  if (entries.length === 0) return null;
   const now = Date.now();
+
   return (
     <div
       className="mb-1 grid gap-1.5 rounded-lg border border-border/60 bg-sidebar-accent/35 px-2.5 py-2"
       aria-label="Codex subscription limits summary"
     >
-      {entries.map((entry) => {
-        const windows = entry.provider.usageLimits?.windows ?? [];
-        return (
-          <div key={`${entry.environmentId}:${entry.provider.instanceId}`} className="grid gap-0.5">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        ChatGPT limits
+      </div>
+      {accounts.length === 0 ? (
+        <div className="text-[10px] text-muted-foreground">Refreshing subscription limits…</div>
+      ) : (
+        accounts.map((account) => (
+          <div key={account.key} className="grid gap-0.5">
             <div className="truncate text-[11px] font-medium text-sidebar-foreground">
-              {entry.accountLabel}
+              {account.displayName ?? account.email ?? "Codex"}
             </div>
             <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] tabular-nums text-muted-foreground">
-              {windows.map((window) => (
+              {account.limits.windows.map((window) => (
                 <span key={window.id}>
                   {window.label}:{" "}
                   <strong className="font-semibold text-sidebar-foreground">
@@ -131,8 +125,8 @@ export function SidebarCodexLimitsSummary() {
               ))}
             </div>
           </div>
-        );
-      })}
+        ))
+      )}
     </div>
   );
 }
