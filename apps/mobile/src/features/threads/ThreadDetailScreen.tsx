@@ -4,6 +4,7 @@ import {
   type CodexArtifactTemplate,
 } from "@t3tools/client-runtime/codex-artifact-templates";
 import type { EnvironmentThreadStatus } from "@t3tools/client-runtime/state/threads";
+import { useAtomValue } from "@effect/atom-react";
 import { useKeyboardChatComposerInset, useKeyboardScrollToEnd } from "@legendapp/list/keyboard";
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
 import type { LegendListRef } from "@legendapp/list/react-native";
@@ -68,6 +69,7 @@ import { codexAccountPresentation } from "../../lib/codexAccountPresentation";
 import { CHAT_CONTENT_MAX_WIDTH, type LayoutVariant } from "../../lib/layout";
 import { IOS_NAV_BAR_HEIGHT } from "../../lib/layoutMetrics";
 import { scopedThreadKey } from "../../lib/scopedEntities";
+import { environmentServerConfigsAtom } from "../../state/server";
 import type {
   PendingApproval,
   PendingUserInput,
@@ -241,6 +243,8 @@ const USER_INPUT_TOGGLE_TIMING = {
 };
 
 export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: ThreadDetailScreenProps) {
+  const liveServerConfigs = useAtomValue(environmentServerConfigsAtom);
+  const effectiveServerConfig = liveServerConfigs.get(props.environmentId) ?? props.serverConfig;
   const insets = useSafeAreaInsets();
   const isKeyboardVisible = useKeyboardState((state) => state.isVisible);
   const liveKeyboardHeight = useKeyboardState((state) => state.height);
@@ -386,7 +390,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     props.selectedThread.session?.providerInstanceId ??
     props.selectedThread.modelSelection.instanceId;
   const activeProvider =
-    props.serverConfig?.providers.find(
+    effectiveServerConfig?.providers.find(
       (provider) => provider.instanceId === activeProviderInstanceId,
     ) ?? null;
   const activeCodexAccount =
@@ -418,12 +422,12 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
       usageLimitsPanel !== null && usageLimitsPanel.key === usageLimitsKey
         ? collectProviderUsageLimits(
             activeProviderInstanceId,
-            props.serverConfig?.providers ?? [],
-            props.serverConfig?.usageLimitSources ?? [],
+            effectiveServerConfig?.providers ?? [],
+            effectiveServerConfig?.usageLimitSources ?? [],
             usageLimitsPanel.now,
           )
         : null,
-    [activeProviderInstanceId, props.serverConfig, usageLimitsKey, usageLimitsPanel],
+    [activeProviderInstanceId, effectiveServerConfig, usageLimitsKey, usageLimitsPanel],
   );
   const showUsageLimits = useCallback(
     (report: UsageLimitsReport | null) =>
@@ -441,12 +445,12 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   const openThreadUsageLimits = useCallback(() => {
     const report = collectProviderUsageLimits(
       activeProviderInstanceId,
-      props.serverConfig?.providers ?? [],
-      props.serverConfig?.usageLimitSources ?? [],
+      effectiveServerConfig?.providers ?? [],
+      effectiveServerConfig?.usageLimitSources ?? [],
       Date.now(),
     );
     showUsageLimits(report);
-  }, [activeProviderInstanceId, props.serverConfig, showUsageLimits]);
+  }, [activeProviderInstanceId, effectiveServerConfig, showUsageLimits]);
   const dismissUsageLimits = useCallback(() => setUsageLimitsPanel(null), []);
   // A send may resolve after navigating away, so only the originating
   // thread's panel is cleared; a panel opened elsewhere in the meantime stays.
@@ -635,13 +639,13 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   const selectedInstanceId = props.selectedThread.modelSelection.instanceId;
   useStreamingHaptics(props.selectedThread.id, props.selectedThreadFeed);
   const selectedProviderSkills = useMemo(() => {
-    const provider = props.serverConfig?.providers.find(
+    const provider = effectiveServerConfig?.providers.find(
       (candidate) => candidate.instanceId === selectedInstanceId,
     );
     return provider
       ? resolveProviderSkillsForCwd(provider, props.threadCwd ?? props.projectWorkspaceRoot)
       : [];
-  }, [props.projectWorkspaceRoot, props.serverConfig, props.threadCwd, selectedInstanceId]);
+  }, [props.projectWorkspaceRoot, effectiveServerConfig, props.threadCwd, selectedInstanceId]);
 
   useLayoutEffect(() => {
     selectedThreadKeyRef.current = selectedThreadKey;
@@ -975,7 +979,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                   environmentLabel={props.environmentLabel}
                   selectedThread={props.selectedThread}
                   hasCompactableConversation={hasCompactableConversation && !props.isCompacting}
-                  serverConfig={props.serverConfig}
+                  serverConfig={effectiveServerConfig}
                   queueCount={props.selectedThreadQueueCount}
                   checkpointContinuation={props.checkpointContinuation}
                   environmentId={props.environmentId}
