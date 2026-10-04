@@ -3,6 +3,7 @@ import { Pressable, ScrollView, useWindowDimensions, View } from "react-native";
 
 import { SymbolView } from "../../components/AppSymbol";
 import { AppText as Text } from "../../components/AppText";
+import { codexAccountPresentation } from "../../lib/codexAccountPresentation";
 import { AccountLimits, ResetCredits } from "../usage/UsageLimitsSection";
 
 const DRIVER_LABEL: Partial<Record<string, string>> = { codex: "Codex", claudeAgent: "Claude" };
@@ -43,24 +44,31 @@ export function ComposerUsageLimits({
       >
         {report.accounts.map((account, index) => {
           const driverLabel = DRIVER_LABEL[account.driver] ?? String(account.driver);
+          const codexAccount =
+            account.driver === "codex" && account.instanceId
+              ? codexAccountPresentation(account.instanceId)
+              : null;
           return (
             <AccountLimits
               key={account.id}
               dense
               first={index === 0}
               driver={account.driver}
-              label={driverLabel}
+              label={codexAccount?.label ?? driverLabel}
               // Siblings need telling apart: a custom instance without a name shows its
               // id, and a pooled account shows its hub and account id.
               instanceLabel={
-                account.instanceId
-                  ? account.displayName?.trim() ||
-                    (String(account.instanceId) !== String(account.driver)
-                      ? account.instanceId
-                      : driverLabel)
-                  : account.label
+                codexAccount
+                  ? codexAccount.label
+                  : account.instanceId
+                    ? account.displayName?.trim() ||
+                      (String(account.instanceId) !== String(account.driver)
+                        ? account.instanceId
+                        : driverLabel)
+                    : account.label
               }
               detail={account.plan}
+              colorOverride={codexAccount?.color}
               limits={account.limits}
               now={now}
               trailing={index === 0 ? close : undefined}

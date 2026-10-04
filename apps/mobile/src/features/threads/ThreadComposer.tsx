@@ -13,6 +13,7 @@ import {
   collectProviderUsageLimits,
   hasProviderUsageLimits,
   isUsageLimitsCommand,
+  remainingPercent,
 } from "@t3tools/shared/usageLimits";
 import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { ReactNode } from "react";
@@ -45,6 +46,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { armAgentAwarenessLiveActivityForLocalWork } from "../agent-awareness/remoteRegistration";
+import { codexAccountPresentation } from "../../lib/codexAccountPresentation";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 
 import { AppText as Text } from "../../components/AppText";
@@ -367,6 +369,20 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       props.serverConfig?.providers ?? [],
       props.serverConfig?.usageLimitSources ?? [],
     );
+  const activeCodexAccount =
+    selectedProviderStatus?.driver === "codex"
+      ? codexAccountPresentation(selectedProviderStatus.instanceId)
+      : null;
+  const sessionLimitWindow = selectedProviderStatus?.usageLimits?.windows.find(
+    (window) => window.label.toLowerCase() === "session",
+  );
+  const weeklyLimitWindow = selectedProviderStatus?.usageLimits?.windows.find(
+    (window) => window.label.toLowerCase() === "weekly",
+  );
+  const activeLimitsInlineLabel =
+    activeCodexAccount && sessionLimitWindow && weeklyLimitWindow
+      ? `${activeCodexAccount.label} · ${remainingPercent(sessionLimitWindow)}% / ${remainingPercent(weeklyLimitWindow)}%`
+      : (activeCodexAccount?.label ?? null);
   // Answered locally from the last Limits snapshot; the agent never sees it.
   const openUsageLimits = useCallback(() => {
     const report = collectProviderUsageLimits(
@@ -903,17 +919,30 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                       onPickMedia={props.onPickDraftMedia}
                       onPickFiles={props.onPickDraftFiles}
                     />
-                    <View className="min-w-0 shrink" style={{ maxWidth: 152 }}>
-                      <ComposerInlineControl
-                        accessibilityLabel="Model and reasoning settings"
-                        emphasized
-                        iconNode={
-                          <ProviderIcon provider={currentModelOption?.providerDriver} size={16} />
-                        }
-                        label={currentModelOption?.label ?? currentModelSelection.model}
-                        maxWidth={152}
-                        onPress={openSettings}
-                      />
+                    <View className="min-w-0 shrink flex-row items-center gap-1">
+                      {usageLimitsOffered && activeLimitsInlineLabel ? (
+                        <ComposerInlineControl
+                          accessibilityLabel={`${activeCodexAccount?.label ?? "Codex"} limits`}
+                          accessibilityHint="Shows the current account session and weekly limits"
+                          emphasized
+                          label={activeLimitsInlineLabel}
+                          maxWidth={168}
+                          onPress={openUsageLimits}
+                          showChevron={false}
+                        />
+                      ) : null}
+                      <View className="min-w-0 shrink" style={{ maxWidth: 152 }}>
+                        <ComposerInlineControl
+                          accessibilityLabel="Model and reasoning settings"
+                          emphasized
+                          iconNode={
+                            <ProviderIcon provider={currentModelOption?.providerDriver} size={16} />
+                          }
+                          label={currentModelOption?.label ?? currentModelSelection.model}
+                          maxWidth={152}
+                          onPress={openSettings}
+                        />
+                      </View>
                     </View>
                   </View>
                 )}

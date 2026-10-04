@@ -45,7 +45,7 @@ describe("mobile model options", () => {
     expect(groupByProvider(buildModelOptions(config, null))).toMatchObject([
       {
         providerKey: "codex",
-        providerLabel: "Codex",
+        providerLabel: "Dad's Codex",
         models: [
           { key: "codex:gpt-5.6-sol", label: "GPT-5.6 Sol", subtitle: "", isLegacy: false },
           { key: "codex:gpt-5.4", label: "GPT-5.4", isLegacy: true },

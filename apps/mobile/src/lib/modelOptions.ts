@@ -7,6 +7,7 @@ import {
   buildExplicitProviderOptionSelectionsFromDescriptors,
   getProviderOptionDescriptors,
 } from "@t3tools/shared/model";
+import { codexAccountPresentation } from "./codexAccountPresentation";
 
 export type ModelOption = {
   readonly key: string;
@@ -35,8 +36,7 @@ function providerDisplayLabel(provider: {
   readonly authEmail?: string | undefined;
 }): string {
   if (provider.driver === "codex") {
-    const name = provider.displayName || "Codex";
-    return provider.authEmail ? name + " · " + provider.authEmail : name;
+    return codexAccountPresentation(provider.instanceId).label;
   }
   if (provider.displayName) return provider.displayName;
   if (provider.driver === "claudeAgent") return "Claude";

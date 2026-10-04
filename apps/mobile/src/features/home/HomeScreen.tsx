@@ -30,6 +30,7 @@ import { AppText as Text } from "../../components/AppText";
 import { EmptyState } from "../../components/EmptyState";
 import type { WorkspaceEnvironment, WorkspaceState } from "../../state/workspaceModel";
 import type { SavedRemoteConnection } from "../../lib/connection";
+import { codexAccountPresentation } from "../../lib/codexAccountPresentation";
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
@@ -206,6 +207,7 @@ function HomeTopContentSpacer() {
 /* ─── Main screen ────────────────────────────────────────────────────── */
 
 export function HomeScreen(props: HomeScreenProps) {
+  const [limitsExpanded, setLimitsExpanded] = useState(false);
   const [groupDisplayStates, setGroupDisplayStates] = useState<
     ReadonlyMap<string, HomeGroupDisplayState>
   >(() => new Map());
@@ -1072,25 +1074,77 @@ export function HomeScreen(props: HomeScreenProps) {
       provider.driver === "codex" && provider.usageLimits ? [{ environmentId, provider }] : [],
     ),
   );
+  const activeRunningThread =
+    [...props.threads]
+      .filter(
+        (thread) => thread.session?.status === "running" || thread.session?.status === "starting",
+      )
+      .sort(
+        (left, right) =>
+          Date.parse(right.session?.updatedAt ?? right.updatedAt ?? right.createdAt) -
+          Date.parse(left.session?.updatedAt ?? left.updatedAt ?? left.createdAt),
+      )[0] ?? null;
+  const activeRunningInstanceId =
+    activeRunningThread?.session?.providerInstanceId ??
+    activeRunningThread?.modelSelection.instanceId ??
+    null;
+  const activeLimitEntry =
+    activeRunningThread && activeRunningInstanceId
+      ? (homeLimitEntries.find(
+          ({ environmentId, provider }) =>
+            environmentId === activeRunningThread.environmentId &&
+            provider.instanceId === activeRunningInstanceId,
+        ) ?? null)
+      : null;
+  const visibleHomeLimitEntries = limitsExpanded
+    ? homeLimitEntries
+    : activeLimitEntry
+      ? [activeLimitEntry]
+      : [];
   const limitsSummary =
     homeLimitEntries.length === 0 ? null : (
       <View className="mx-4 mb-3 overflow-hidden rounded-2xl border border-border bg-card">
-        <View className="border-b border-border-subtle px-4 py-2">
-          <Text className="text-xs font-t3-medium text-foreground-muted">CHATGPT LIMITS</Text>
-        </View>
-        {homeLimitEntries.map(({ environmentId, provider }, index) => (
-          <AccountLimits
-            key={`${environmentId}:${provider.instanceId}`}
-            dense
-            first={index === 0}
-            driver={provider.driver}
-            label={provider.auth.label?.trim() || "Codex"}
-            instanceLabel={String(provider.instanceId)}
-            detail={provider.auth.type}
-            limits={provider.usageLimits}
-            now={Date.now()}
-          />
-        ))}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={
+            limitsExpanded ? "Show active Codex limits only" : "Show all Codex limits"
+          }
+          onPress={() => setLimitsExpanded((expanded) => !expanded)}
+          className="border-b border-border-subtle px-4 py-2.5 active:bg-subtle"
+        >
+          <View className="flex-row items-center justify-between gap-3">
+            <Text className="text-xs font-t3-medium text-foreground-muted">CHATGPT LIMITS</Text>
+            <Text className="text-xs font-t3-medium text-foreground-secondary">
+              {limitsExpanded
+                ? "Show active"
+                : homeLimitEntries.length > 1
+                  ? `Show all ${homeLimitEntries.length}`
+                  : "Details"}
+            </Text>
+          </View>
+          {!limitsExpanded && activeLimitEntry === null ? (
+            <Text className="mt-1 text-xs text-foreground-tertiary">
+              No Codex session is running. Tap to view all account limits.
+            </Text>
+          ) : null}
+        </Pressable>
+        {visibleHomeLimitEntries.map(({ environmentId, provider }, index) => {
+          const account = codexAccountPresentation(provider.instanceId);
+          return (
+            <AccountLimits
+              key={`${environmentId}:${provider.instanceId}`}
+              dense
+              first={index === 0}
+              driver={provider.driver}
+              label={account.label}
+              instanceLabel={provider.auth.email?.trim() || account.label}
+              detail={provider.auth.label?.trim() || provider.auth.type}
+              limits={provider.usageLimits}
+              now={Date.now()}
+              colorOverride={account.color}
+            />
+          );
+        })}
       </View>
     );
   const listHeader =

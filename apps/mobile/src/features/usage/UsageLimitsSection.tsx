@@ -106,6 +106,7 @@ export function AccountLimits(props: {
   readonly limits: ServerProvider["usageLimits"];
   readonly now: number;
   readonly first: boolean;
+  readonly colorOverride?: string;
   /** Tighter padding for the composer card. */
   readonly dense?: boolean;
   /** Sits at the end of the heading row, such as a close control. */
@@ -113,7 +114,8 @@ export function AccountLimits(props: {
   readonly footer?: ReactNode;
 }) {
   const { limits, now, dense = false } = props;
-  const color = useBarColor(props.driver);
+  const providerColor = useBarColor(props.driver);
+  const color = props.colorOverride ?? providerColor;
   if (!limits) return null;
   const notice = limitsNotice(limits);
   const padding = dense ? "px-4 py-3" : "p-4";
@@ -124,6 +126,10 @@ export function AccountLimits(props: {
       }
     >
       <View className="flex-row items-center gap-2">
+        <View
+          className="h-2.5 w-2.5 rounded-full"
+          style={{ backgroundColor: color ?? undefined }}
+        />
         <ProviderIcon provider={props.driver} size={16} />
         <View className="min-w-0 flex-1 flex-row items-baseline gap-2">
           <Text className="text-base font-t3-medium text-foreground">{props.label}</Text>

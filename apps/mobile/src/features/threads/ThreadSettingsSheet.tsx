@@ -39,6 +39,7 @@ import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { ProviderIcon } from "../../components/ProviderIcon";
 import { ThemedSwitch } from "../../components/ThemedSwitch";
 import { cn } from "../../lib/cn";
+import { codexAccountPresentation } from "../../lib/codexAccountPresentation";
 import type { ModelOption, ProviderGroup } from "../../lib/modelOptions";
 import { applyProviderOptionSelection } from "../../lib/providerOptions";
 import { resolveProviderOptionDescriptors } from "../../lib/providerOptions";
@@ -746,6 +747,7 @@ function ThreadSettingsAccountSwitcher() {
         {session.providerGroups.map((group, index) => {
           const selected = group.providerKey === session.activeProviderKey;
           const driver = group.models[0]?.providerDriver;
+          const account = driver === "codex" ? codexAccountPresentation(group.providerKey) : null;
           return (
             <Pressable
               key={group.providerKey}
@@ -758,6 +760,12 @@ function ThreadSettingsAccountSwitcher() {
               )}
               onPress={() => session.switchProviderAccount(group.providerKey)}
             >
+              {account ? (
+                <View
+                  className="h-2.5 w-2.5 rounded-full"
+                  style={{ backgroundColor: account.color }}
+                />
+              ) : null}
               <ProviderIcon provider={driver} size={18} />
               <View className="min-w-0 flex-1">
                 <Text className="text-base font-t3-medium text-foreground" numberOfLines={1}>
