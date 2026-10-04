@@ -4467,24 +4467,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const handleQueuePrimaryAction = useCallback(() => {
     if (!activeThread || phase !== "running") return;
-    void stashCurrentPrompt({
-      queueTarget: {
-        environmentId,
-        threadId: activeThread.id,
-        modelSelection: selectedModelSelection,
-        runtimeMode,
-        interactionMode,
-      },
-    });
-  }, [
-    activeThread,
-    environmentId,
-    interactionMode,
-    phase,
-    runtimeMode,
-    selectedModelSelection,
-    stashCurrentPrompt,
-  ]);
+    onSend(undefined, "queue");
+  }, [activeThread, onSend, phase]);
 
   const handleSteerPrimaryAction = useCallback(() => {
     if (phase !== "running") return;

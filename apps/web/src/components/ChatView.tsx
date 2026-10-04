@@ -11,6 +11,7 @@ import {
   type AssistantCitation,
   type ApprovalRequestId,
   type ChatFileAttachment,
+  CommandId,
   DEFAULT_MODEL,
   type EnvironmentId,
   type MessageId,
@@ -85,7 +86,11 @@ import {
 import { flushSync } from "react-dom";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import { assistantCitationsToPlainText } from "@t3tools/shared/assistantCitations";
-import { buildCheckpointContinuation } from "@t3tools/shared/checkpointContinuation";
+import {
+  buildCheckpointContinuation,
+  resolveCheckpointContinuationDeliveryMode,
+  type CheckpointContinuationSubmissionIntent,
+} from "@t3tools/shared/checkpointContinuation";
 import { assistantCitationFromLocation } from "../lib/assistantCitationNavigation";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
 import { useShallow } from "zustand/react/shallow";
@@ -265,6 +270,15 @@ import {
   useComposerDraftStore,
   type DraftId,
 } from "../composerDraftStore";
+import { compressImageForStash } from "../lib/imageCompression";
+import { partitionStashAttachments } from "../promptStashStore";
+import {
+  isPromptQueuePaused,
+  promptQueueEntriesForThread,
+  usePromptQueueStore,
+  type PromptQueueDeliveryMode,
+  type PromptQueueEntry,
+} from "../promptQueueStore";
 import {
   appendTerminalContextsToPrompt,
   formatTerminalContextLabel,
@@ -310,6 +324,8 @@ import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { createPageScrollController, type PageScrollKey } from "./chat/pageScrollController";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
+import { CheckpointContinuationDialog } from "./CheckpointContinuationDialog";
+import { PromptQueueDialog } from "./PromptQueueDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
 import { MessagesTimeline } from "./chat/MessagesTimeline";
 import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
@@ -413,6 +429,7 @@ import {
   awaitAttachmentUploads,
   getUploadedAttachments,
   releaseDraftAttachments,
+  releasePersistedAttachmentUpload,
   startAttachmentUpload,
 } from "../lib/attachmentUploadQueue";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
@@ -1799,6 +1816,27 @@ export default function ChatView(props: ChatViewProps) {
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
   const activeThreadId = activeThread?.id ?? null;
+  const promptQueueAllEntries = usePromptQueueStore((store) => store.entries);
+  const enqueuePromptQueueEntry = usePromptQueueStore((store) => store.enqueue);
+  const updatePromptQueueEntry = usePromptQueueStore((store) => store.updateEntry);
+  const removePromptQueueEntry = usePromptQueueStore((store) => store.removeEntry);
+  const movePromptQueueEntry = usePromptQueueStore((store) => store.moveEntry);
+  const prioritizePromptQueueEntry = usePromptQueueStore((store) => store.prioritizeEntry);
+  const pausePromptQueue = usePromptQueueStore((store) => store.pauseThread);
+  const resumePromptQueue = usePromptQueueStore((store) => store.resumeThread);
+  const activePromptQueueEntries = useMemo(
+    () =>
+      activeThreadId === null
+        ? []
+        : promptQueueEntriesForThread(promptQueueAllEntries, environmentId, activeThreadId),
+    [activeThreadId, environmentId, promptQueueAllEntries],
+  );
+  const promptQueuePaused = useMemo(
+    () => isPromptQueuePaused(activePromptQueueEntries),
+    [activePromptQueueEntries],
+  );
+  const [promptQueueOpen, setPromptQueueOpen] = useState(false);
+  const [checkpointContinuationOpen, setCheckpointContinuationOpen] = useState(false);
   const activeThreadEnvironmentId = activeThread?.environmentId ?? null;
   const runningTerminalIds = useThreadRunningTerminalIds({
     environmentId: activeThread?.environmentId ?? null,
@@ -6127,6 +6165,418 @@ export default function ChatView(props: ChatViewProps) {
     ],
   );
 
+  const activeThreadBusy =
+    activeThread?.session?.status === "running" ||
+    activeThread?.session?.status === "starting" ||
+    activeThread?.latestTurn?.state === "running";
+
+  const queuePreparedPrompt = useCallback(
+    async (deliveryMode: PromptQueueDeliveryMode): Promise<boolean> => {
+      if (!activeThread || activeThreadId === null || (isLocalDraftThread && !activeProject)) {
+        return false;
+      }
+      const sendCtx = composerRef.current?.getSendContext();
+      if (!sendCtx?.providerAvailable) return false;
+      const {
+        images,
+        files,
+        terminalContexts,
+        elementContexts,
+        previewAnnotations,
+        reviewComments,
+        selectedProvider,
+        selectedModel,
+        selectedProviderModels,
+        selectedPromptEffort,
+        selectedModelSelection,
+      } = sendCtx;
+      const derived = deriveComposerSendState({
+        prompt: promptRef.current,
+        imageCount: images.length + files.length,
+        terminalContexts,
+        elementContextCount:
+          elementContexts.length + previewAnnotations.length + reviewComments.length,
+      });
+      if (!derived.hasSendableContent) return false;
+      let text = appendElementContextsToPrompt(
+        appendTerminalContextsToPrompt(promptRef.current, derived.sendableTerminalContexts),
+        elementContexts,
+      );
+      for (const annotation of previewAnnotations) {
+        text = appendPreviewAnnotationPrompt(text, annotation);
+      }
+      text = appendReviewCommentsToPrompt(text, reviewComments);
+      const outgoingText = formatOutgoingPrompt({
+        provider: selectedProvider,
+        model: selectedModel,
+        models: selectedProviderModels,
+        effort: selectedPromptEffort,
+        text: text || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
+      });
+      if (composerRef.current?.validateProviderInput(outgoingText) === false) return false;
+
+      const persistedImages = [];
+      for (const image of images) {
+        const compressed = await compressImageForStash(image.file);
+        if (!compressed.ok) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Could not preserve queued image",
+              description: `${image.name} could not be stored safely. The draft was not cleared.`,
+            }),
+          );
+          return false;
+        }
+        persistedImages.push({
+          id: image.id,
+          name: image.name,
+          mimeType: compressed.image.mimeType,
+          sizeBytes: compressed.image.sizeBytes,
+          dataUrl: compressed.image.dataUrl,
+        });
+      }
+      const partitionedImages = partitionStashAttachments(persistedImages);
+      if (partitionedImages.droppedNames.length > 0) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Queued images exceed durable storage",
+            description: "The draft was kept intact. Remove or reduce images before queuing.",
+          }),
+        );
+        return false;
+      }
+
+      const persistedFiles = [];
+      if (files.length > 0) {
+        const config = appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId) ?? null;
+        if (config?.environment.capabilities.attachmentUploads !== true) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "error",
+              title: "Files cannot be queued offline",
+              description:
+                "This environment must support attachment uploads. The draft was not cleared.",
+            }),
+          );
+          return false;
+        }
+        for (const file of files) {
+          startAttachmentUpload({ environmentId, image: file, draftTarget: composerDraftTarget });
+        }
+        await awaitAttachmentUploads(files.map((file) => file.id));
+        const uploaded = getUploadedAttachments({ environmentId, images: files });
+        if (!uploaded || uploaded.length !== files.length) {
+          setThreadError(activeThreadId, "Retry or remove failed uploads before queuing.");
+          return false;
+        }
+        for (let index = 0; index < files.length; index += 1) {
+          const file = files[index]!;
+          const serverAttachment = uploaded[index]!;
+          if (serverAttachment.type !== "file") return false;
+          persistedFiles.push({
+            id: file.id,
+            name: file.name,
+            mimeType: file.mimeType,
+            sizeBytes: file.sizeBytes,
+            attachmentId: serverAttachment.id,
+            environmentId,
+          });
+        }
+      }
+
+      let queuedTitleSeed = promptRef.current.trim();
+      if (!queuedTitleSeed) {
+        if (images[0]) {
+          queuedTitleSeed = `Image: ${images[0].name}`;
+        } else if (files[0]) {
+          queuedTitleSeed = `File: ${files[0].name}`;
+        } else if (derived.sendableTerminalContexts[0]) {
+          queuedTitleSeed = formatTerminalContextLabel(derived.sendableTerminalContexts[0]);
+        } else if (elementContexts[0]) {
+          queuedTitleSeed = formatElementContextLabel(elementContexts[0]);
+        } else {
+          queuedTitleSeed = "New thread";
+        }
+      }
+      const queuedTitle = truncate(queuedTitleSeed);
+      const queuedBaseBranchForWorktree =
+        isLocalDraftThread && sendEnvMode === "worktree" && !activeThread.worktreePath
+          ? activeThreadBranch
+          : null;
+      if (
+        isLocalDraftThread &&
+        sendEnvMode === "worktree" &&
+        !activeThread.worktreePath &&
+        queuedBaseBranchForWorktree === null
+      ) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "Choose a base branch before queuing",
+            description:
+              "The first queued message needs the same worktree base branch as a normal send.",
+          }),
+        );
+        return false;
+      }
+
+      const creation =
+        isLocalDraftThread && activeProject
+          ? {
+              projectId: activeProject.id,
+              title: queuedTitle,
+              threadCreatedAt: activeThread.createdAt,
+              branch: activeThreadBranch,
+              worktreePath: activeThread.worktreePath,
+              ...(queuedBaseBranchForWorktree
+                ? {
+                    prepareWorktree: {
+                      projectCwd: activeProject.workspaceRoot,
+                      baseBranch: queuedBaseBranchForWorktree,
+                      branch: buildTemporaryWorktreeBranchName(randomHex),
+                      ...(startFromOrigin ? { startFromOrigin: true } : {}),
+                    },
+                  }
+                : {}),
+            }
+          : undefined;
+      const messageId = newMessageId();
+      const entry: PromptQueueEntry = {
+        id: String(messageId),
+        environmentId,
+        threadId: activeThreadId,
+        messageId,
+        commandId: CommandId.make(`web-queue:${randomHex(16)}`),
+        text: outgoingText,
+        images: partitionedImages.kept,
+        files: persistedFiles,
+        modelSelection: selectedModelSelection,
+        runtimeMode,
+        interactionMode,
+        deliveryMode,
+        ...(creation ? { creation } : {}),
+        createdAt: new Date().toISOString(),
+      };
+      const persisted = enqueuePromptQueueEntry(entry);
+      if (!persisted.written || !persisted.durable) {
+        if (persisted.written) removePromptQueueEntry(entry.id);
+        toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "Could not save prompt queue durably",
+            description: "The draft was kept intact so no work is lost.",
+          }),
+        );
+        return false;
+      }
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+      for (const image of images) revokeBlobPreviewUrl(image.previewUrl);
+      toastManager.add(
+        stackedThreadToast({
+          type: "success",
+          title: deliveryMode === "steer" ? "Steering active turn" : "Prompt queued",
+          description:
+            deliveryMode === "paused" ? "Queue is paused until you resume it." : undefined,
+        }),
+      );
+      return true;
+    },
+    [
+      activeProject,
+      activeThread,
+      activeThreadBranch,
+      activeThreadId,
+      clearComposerDraftContent,
+      composerDraftTarget,
+      composerRef,
+      enqueuePromptQueueEntry,
+      environmentId,
+      interactionMode,
+      isLocalDraftThread,
+      removePromptQueueEntry,
+      runtimeMode,
+      sendEnvMode,
+      setThreadError,
+      startFromOrigin,
+    ],
+  );
+
+  const queueTextPrompt = useCallback(
+    (text: string, deliveryMode: PromptQueueDeliveryMode): boolean => {
+      if (!activeThread || !isServerThread || activeThreadId === null) return false;
+      const messageId = newMessageId();
+      const persisted = enqueuePromptQueueEntry({
+        id: String(messageId),
+        environmentId,
+        threadId: activeThreadId,
+        messageId,
+        commandId: CommandId.make(`web-queue:${randomHex(16)}`),
+        text: text.trim(),
+        images: [],
+        files: [],
+        modelSelection: activeThread.modelSelection,
+        runtimeMode: activeThread.runtimeMode,
+        interactionMode: activeThread.interactionMode,
+        deliveryMode,
+        createdAt: new Date().toISOString(),
+      });
+      if (!persisted.written || !persisted.durable) {
+        if (persisted.written) removePromptQueueEntry(String(messageId));
+        return false;
+      }
+      return true;
+    },
+    [
+      activeThread,
+      activeThreadId,
+      enqueuePromptQueueEntry,
+      environmentId,
+      isServerThread,
+      removePromptQueueEntry,
+    ],
+  );
+
+  const submitCheckpointContinuation = useCallback(
+    async (text: string, intent: CheckpointContinuationSubmissionIntent): Promise<boolean> => {
+      if (!checkpointContinuation || !activeThread || !isServerThread || activeThreadId === null) {
+        return false;
+      }
+      if (intent === "now") {
+        if (activeEnvironmentConnectionPhase !== "connected" || activeThreadBusy) return false;
+        const createdAt = new Date().toISOString();
+        const result = await startThreadTurn({
+          environmentId,
+          input: {
+            commandId: CommandId.make(`web-queue:${randomHex(16)}`),
+            threadId: activeThreadId,
+            message: {
+              messageId: newMessageId(),
+              role: "user",
+              text: text.trim(),
+              attachments: [],
+            },
+            modelSelection: activeThread.modelSelection,
+            runtimeMode: activeThread.runtimeMode,
+            interactionMode: activeThread.interactionMode,
+            createdAt,
+          },
+        });
+        return result._tag !== "Failure";
+      }
+      const deliveryMode = resolveCheckpointContinuationDeliveryMode({
+        intent,
+        continuationKind: checkpointContinuation.kind,
+        threadBusy: activeThreadBusy,
+      });
+      return queueTextPrompt(text, deliveryMode);
+    },
+    [
+      activeEnvironmentConnectionPhase,
+      activeThread,
+      activeThreadBusy,
+      activeThreadId,
+      checkpointContinuation,
+      environmentId,
+      isServerThread,
+      queueTextPrompt,
+      startThreadTurn,
+    ],
+  );
+
+  const handleDeletePromptQueueEntry = useCallback(
+    (entry: PromptQueueEntry) => {
+      const removed = removePromptQueueEntry(entry.id);
+      if (removed) {
+        for (const file of entry.files) {
+          releasePersistedAttachmentUpload({
+            id: file.id,
+            environmentId: entry.environmentId,
+            attachmentId: file.attachmentId,
+          });
+        }
+      }
+      return removed;
+    },
+    [removePromptQueueEntry],
+  );
+
+  const finalComposerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
+    const parityItems: ComposerBannerStackItem[] = [];
+    if (checkpointContinuation) {
+      parityItems.push({
+        id: "checkpoint-continuation",
+        variant: "info",
+        icon: <AlarmClockIcon />,
+        title: "Interrupted work can continue from checkpoint",
+        description: checkpointContinuation.reason,
+        actions: (
+          <Button size="xs" onClick={() => setCheckpointContinuationOpen(true)}>
+            Continue
+          </Button>
+        ),
+      });
+    }
+    if (activePromptQueueEntries.length > 0) {
+      parityItems.push({
+        id: "prompt-queue",
+        variant: promptQueuePaused ? "warning" : "info",
+        icon: <AlarmClockIcon />,
+        title: `${activePromptQueueEntries.length} queued prompt${activePromptQueueEntries.length === 1 ? "" : "s"}`,
+        description: promptQueuePaused
+          ? "Queue is paused."
+          : "Queued work will dispatch automatically when eligible.",
+        actions: (
+          <Button size="xs" variant="outline" onClick={() => setPromptQueueOpen(true)}>
+            Manage queue
+          </Button>
+        ),
+      });
+    }
+    if (activeThreadId !== null && composerHasUnsentContent) {
+      parityItems.push({
+        id: "queue-current-draft",
+        variant: "default",
+        icon: <AlarmClockIcon />,
+        title: activeThreadBusy ? "Draft ready while this turn is running" : "Draft ready to queue",
+        description: activeThreadBusy
+          ? "Queue it for after this turn, or steer the active turn now."
+          : "Save this draft for later without sending it now.",
+        actions: (
+          <>
+            <Button
+              size="xs"
+              variant="outline"
+              onClick={() =>
+                void queuePreparedPrompt(activeThreadBusy ? "after-success" : "paused")
+              }
+            >
+              Queue
+            </Button>
+            {activeThreadBusy ? (
+              <Button size="xs" onClick={() => void queuePreparedPrompt("steer")}>
+                Steer now
+              </Button>
+            ) : null}
+          </>
+        ),
+      });
+    }
+    return [...parityItems, ...composerBannerItems];
+  }, [
+    activePromptQueueEntries.length,
+    activeThreadBusy,
+    activeThreadId,
+    checkpointContinuation,
+    composerBannerItems,
+    composerHasUnsentContent,
+    promptQueuePaused,
+    queuePreparedPrompt,
+  ]);
+
   const onSend = async (
     e?: { preventDefault: () => void },
     submissionIntent: ComposerSubmissionIntent = "foreground",
@@ -6136,6 +6586,14 @@ export default function ChatView(props: ChatViewProps) {
     },
   ) => {
     e?.preventDefault();
+    if (submissionIntent === "queue") {
+      await queuePreparedPrompt(activeThreadBusy ? "after-success" : "paused");
+      return;
+    }
+    if (submissionIntent === "steer") {
+      await queuePreparedPrompt("steer");
+      return;
+    }
     // Typed out in full rather than picked from the menu. Attachments or contexts
     // mean the user is sending a prompt, so those go through as usual.
     if (
@@ -6936,21 +7394,9 @@ export default function ChatView(props: ChatViewProps) {
     }
   };
 
-  const onContinueFromCheckpoint = async () => {
+  const onContinueFromCheckpoint = () => {
     if (!checkpointContinuation) return;
-    if (composerHasUnsentContent) {
-      toastManager.add({
-        type: "warning",
-        title: "Draft already in composer",
-        description:
-          "Send, stash, or clear the current draft before continuing from the checkpoint.",
-      });
-      return;
-    }
-    promptRef.current = checkpointContinuation.prompt;
-    setComposerDraftPrompt(composerDraftTarget, checkpointContinuation.prompt);
-    composerRef.current?.resetCursorState();
-    await onSend(undefined, "foreground");
+    setCheckpointContinuationOpen(true);
   };
 
   const onInterrupt = async () => {
@@ -8056,7 +8502,7 @@ export default function ChatView(props: ChatViewProps) {
                                   : null
                             }
                             isPreparingWorktree={isPreparingWorktree}
-                            bannerItems={composerBannerItems}
+                            bannerItems={finalComposerBannerItems}
                             // With attachments or contexts aboard the pick just inserts the
                             // text, so it sends as a prompt like the typed path would.
                             onUsageLimitsCommand={
@@ -8238,6 +8684,38 @@ export default function ChatView(props: ChatViewProps) {
                 </AlertDialogFooter>
               </AlertDialogPopup>
             </AlertDialog>
+
+            <PromptQueueDialog
+              open={promptQueueOpen}
+              busy={activeThreadBusy}
+              paused={promptQueuePaused}
+              entries={activePromptQueueEntries}
+              onOpenChange={setPromptQueueOpen}
+              onEdit={(entry, text) => updatePromptQueueEntry(entry.id, { text: text.trim() })}
+              onDelete={handleDeletePromptQueueEntry}
+              onMove={(entry, direction) =>
+                movePromptQueueEntry(environmentId, activeThread.id, entry.id, direction)
+              }
+              onSendNow={(entry) =>
+                prioritizePromptQueueEntry(
+                  environmentId,
+                  activeThread.id,
+                  entry.id,
+                  activeThreadBusy ? "steer" : "immediate",
+                )
+              }
+              onPause={() => pausePromptQueue(environmentId, activeThread.id)}
+              onResume={() => resumePromptQueue(environmentId, activeThread.id, !activeThreadBusy)}
+            />
+            <CheckpointContinuationDialog
+              open={checkpointContinuationOpen}
+              continuation={checkpointContinuation}
+              connectionState={activeEnvironmentConnectionPhase}
+              sessionStatus={activeThread.session?.status ?? null}
+              latestTurnState={activeThread.latestTurn?.state ?? null}
+              onOpenChange={setCheckpointContinuationOpen}
+              onSubmit={submitCheckpointContinuation}
+            />
 
             {pullRequestDialogState ? (
               <PullRequestThreadDialog
