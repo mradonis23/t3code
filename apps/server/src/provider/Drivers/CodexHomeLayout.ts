@@ -30,7 +30,7 @@ const KNOWN_SHARED_DIRECTORIES = [
 ] as const;
 
 const PRIVATE_ENTRY_NAMES = new Set(["auth.json", "models_cache.json"]);
-const SHADOW_LOCAL_ENTRY_NAMES = new Set(["log", "memories", "tmp"]);
+const SHADOW_LOCAL_ENTRY_NAMES = new Set(["log", "memories", "tmp", ".sqlite-maintenance.lock"]);
 // SQLite databases and their journals must stay together in the runtime home.
 const SHADOW_LOCAL_DATABASE =
   /^(?:goals|logs|memories|queue|state|thread_history)(?:_\d+)?\.sqlite(?:-(?:shm|wal))?$/;
@@ -380,10 +380,10 @@ export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome"
     );
   const sharedEntryNames = yield* readEntryNames(layout.sharedHomePath);
   const shadowEntryNames = yield* readEntryNames(effectiveHomePath);
-  // Older overlays linked these databases. Unlink only the overlay entry;
+  // Older overlays linked account-local runtime state. Unlink only the overlay entry;
   // never copy an open database or remove its shared target.
   yield* Effect.forEach(
-    shadowEntryNames.filter((entryName) => SHADOW_LOCAL_DATABASE.test(entryName)),
+    shadowEntryNames.filter((entryName) => isShadowLocalEntry(entryName)),
     (entryName) =>
       removePrivateSymlink({
         fileSystem,

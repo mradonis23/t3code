@@ -32,9 +32,13 @@ function providerDisplayLabel(provider: {
   readonly displayName?: string | undefined;
   readonly driver: string;
   readonly instanceId: string;
+  readonly authEmail?: string | undefined;
 }): string {
+  if (provider.driver === "codex") {
+    const name = provider.displayName || "Codex";
+    return provider.authEmail ? name + " · " + provider.authEmail : name;
+  }
   if (provider.displayName) return provider.displayName;
-  if (provider.driver === "codex") return "Codex";
   if (provider.driver === "claudeAgent") return "Claude";
   return provider.instanceId;
 }
@@ -163,7 +167,10 @@ export function buildModelOptions(
       continue;
     }
 
-    const providerLabel = providerDisplayLabel(provider);
+    const providerLabel = providerDisplayLabel({
+      ...provider,
+      authEmail: provider.auth.email,
+    });
     for (const model of provider.models) {
       const key = `${provider.instanceId}:${model.slug}`;
       options.set(key, {
@@ -212,6 +219,7 @@ export function buildModelOptions(
         driver: providerDriver,
         displayName: provider?.displayName ?? instanceConfig?.displayName,
         instanceId: fallbackModelSelection.instanceId,
+        authEmail: provider?.auth.email,
       });
       options.set(key, {
         key,

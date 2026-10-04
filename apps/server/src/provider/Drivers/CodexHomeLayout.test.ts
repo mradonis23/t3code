@@ -170,14 +170,19 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
     );
 
     it.effect.skipIf(!symlinksSupported)(
-      "unlinks old runtime database overlays without touching shared files or recreating links",
+      "unlinks old account-local runtime overlays without touching shared files or recreating links",
       () =>
         Effect.gen(function* () {
           const fs = yield* FileSystem.FileSystem;
           const path = yield* Path.Path;
           const sharedHome = yield* makeTempDir("t3code-codex-shared-");
           const shadowHome = yield* makeTempDir("t3code-codex-shadow-");
-          const names = ["goals_1.sqlite", "state_5.sqlite-wal", "logs_2.sqlite-shm"];
+          const names = [
+            "goals_1.sqlite",
+            "state_5.sqlite-wal",
+            "logs_2.sqlite-shm",
+            ".sqlite-maintenance.lock",
+          ];
           for (const name of names) {
             yield* writeTextFile(path.join(sharedHome, name), "shared");
             yield* fs.symlink(path.join(sharedHome, name), path.join(shadowHome, name));

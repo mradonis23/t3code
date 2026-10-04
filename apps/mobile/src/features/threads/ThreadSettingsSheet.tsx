@@ -375,6 +375,7 @@ type ThreadSettingsSessionValue = {
   readonly providerExpansionOverrides: ReadonlySet<string>;
   readonly hasLegacyModels: boolean;
   readonly pendingModel: ModelOption | null;
+  readonly activeProviderKey: string | null;
   readonly providerFilter: string | null;
   readonly searchQuery: string;
   readonly showLegacy: boolean;
@@ -383,6 +384,7 @@ type ThreadSettingsSessionValue = {
   readonly isApplied: (option: ModelOption) => boolean;
   readonly isDisplayed: (option: ModelOption) => boolean;
   readonly pressModel: (option: ModelOption) => void;
+  readonly switchProviderAccount: (providerKey: string) => void;
   readonly setProviderFilter: (providerKey: string | null) => void;
   readonly setSearchQuery: (query: string) => void;
   readonly setShowLegacy: (showLegacy: boolean) => void;
@@ -492,6 +494,32 @@ function ThreadSettingsSessionProvider(
     [isApplied],
   );
 
+  const activeProviderKey =
+    pendingModel?.selection.instanceId ??
+    props.selectedModel?.instanceId ??
+    props.providerInstanceId ??
+    null;
+  const switchProviderAccount = useCallback(
+    (providerKey: string) => {
+      const group = props.providerGroups.find((candidate) => candidate.providerKey === providerKey);
+      if (!group) return;
+      const currentModelSlug = pendingModel?.selection.model ?? props.selectedModel?.model;
+      const target =
+        (currentModelSlug
+          ? group.models.find(
+              (model) => model.selection.model === currentModelSlug && !model.isUnavailable,
+            )
+          : undefined) ??
+        group.models.find((model) => model.isDefault && !model.isUnavailable) ??
+        group.models.find((model) => !model.isUnavailable);
+      if (!target) return;
+      void Haptics.selectionAsync();
+      setProviderFilter(providerKey);
+      setPendingModel(target);
+    },
+    [pendingModel?.selection.model, props.providerGroups, props.selectedModel?.model],
+  );
+
   const value = useMemo<ThreadSettingsSessionValue>(
     () => ({
       environmentId: props.environmentId,
@@ -503,6 +531,7 @@ function ThreadSettingsSessionProvider(
       providerExpansionOverrides,
       hasLegacyModels,
       pendingModel,
+      activeProviderKey,
       providerFilter,
       searchQuery,
       showLegacy: showLegacyToggle,
@@ -511,12 +540,14 @@ function ThreadSettingsSessionProvider(
       isApplied,
       isDisplayed,
       pressModel,
+      switchProviderAccount,
       setProviderFilter,
       setSearchQuery,
       setShowLegacy: setShowLegacyToggle,
       toggleProvider,
     }),
     [
+      activeProviderKey,
       applyOptionChange,
       commitPendingModel,
       displayedDescriptors,
@@ -534,6 +565,7 @@ function ThreadSettingsSessionProvider(
       props.runtimeMode,
       searchQuery,
       showLegacyToggle,
+      switchProviderAccount,
       toggleProvider,
     ],
   );
@@ -696,6 +728,66 @@ function useThreadSettingsCatalogItems(
       session.searchQuery,
       session.showLegacy,
     ],
+  );
+}
+
+function ThreadSettingsAccountSwitcher() {
+  const session = useThreadSettingsSession();
+  if (session.providerGroups.length === 0) {
+    return null;
+  }
+
+  return (
+    <View className="px-4 pb-2 pt-1">
+      <Text className="px-1 pb-2 text-xs font-t3-bold uppercase tracking-wider text-foreground-muted">
+        Account
+      </Text>
+      <View className="overflow-hidden rounded-2xl bg-card">
+        {session.providerGroups.map((group, index) => {
+          const selected = group.providerKey === session.activeProviderKey;
+          const driver = group.models[0]?.providerDriver;
+          return (
+            <Pressable
+              key={group.providerKey}
+              accessibilityLabel={`Account ${group.providerLabel}`}
+              accessibilityRole="radio"
+              accessibilityState={{ checked: selected }}
+              className={cn(
+                "min-h-14 flex-row items-center gap-3 px-4 py-3 active:bg-subtle",
+                index < session.providerGroups.length - 1 && "border-b border-border-subtle",
+              )}
+              onPress={() => session.switchProviderAccount(group.providerKey)}
+            >
+              <ProviderIcon provider={driver} size={18} />
+              <View className="min-w-0 flex-1">
+                <Text className="text-base font-t3-medium text-foreground" numberOfLines={1}>
+                  {group.providerLabel}
+                </Text>
+                <Text className="text-xs text-foreground-muted">
+                  {selected ? "Current Codex session" : "Switch to this account"}
+                </Text>
+              </View>
+              {selected ? (
+                <SymbolView
+                  name="checkmark"
+                  size={16}
+                  tintColorClassName="accent-icon"
+                  type="monochrome"
+                  weight="semibold"
+                />
+              ) : (
+                <SymbolView
+                  name="chevron.right"
+                  size={12}
+                  tintColorClassName="accent-icon-subtle"
+                  type="monochrome"
+                />
+              )}
+            </Pressable>
+          );
+        })}
+      </View>
+    </View>
   );
 }
 
@@ -877,6 +969,7 @@ function ThreadSettingsMainContent(props: {
               />
             </View>
           ) : null}
+          <ThreadSettingsAccountSwitcher />
         </>
       }
       recycleItems

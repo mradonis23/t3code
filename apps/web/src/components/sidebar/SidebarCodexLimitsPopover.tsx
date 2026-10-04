@@ -111,7 +111,10 @@ export function SidebarCodexLimitsSummary() {
         accounts.map((account) => (
           <div key={account.key} className="grid gap-0.5">
             <div className="truncate text-[11px] font-medium text-sidebar-foreground">
-              {account.displayName ?? account.email ?? "Codex"}
+              {account.email ?? account.displayName ?? "Codex"}
+            </div>
+            <div className="truncate text-[10px] text-muted-foreground">
+              {[account.displayName ?? "Codex", account.plan].filter(Boolean).join(" · ")}
             </div>
             <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] tabular-nums text-muted-foreground">
               {account.limits.windows.map((window) => (

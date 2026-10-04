@@ -7,6 +7,10 @@ const extraThemes = require("./generated-uniwind-theme-names.json");
 /** @type {import("expo/metro-config").MetroConfig} */
 const config = getDefaultConfig(__dirname);
 const workspaceRoot = path.resolve(__dirname, "../..");
+const expoPackageRoot = fs.realpathSync(path.join(__dirname, "node_modules", "expo"));
+const externalPnpmStoreRoot = expoPackageRoot.startsWith(workspaceRoot)
+  ? null
+  : path.dirname(path.dirname(path.dirname(expoPackageRoot)));
 const escapedWorkspaceRoot = workspaceRoot.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const mobileShikiRoot = path.dirname(require.resolve("shiki/package.json", { paths: [__dirname] }));
 const resolveShikiDependencyRoot = (packageName) => {
@@ -24,7 +28,13 @@ const resolveShikiDependencyRoot = (packageName) => {
   return currentDir;
 };
 
-config.watchFolders = [...new Set([...(config.watchFolders ?? []), workspaceRoot])];
+config.watchFolders = [
+  ...new Set([
+    ...(config.watchFolders ?? []),
+    workspaceRoot,
+    ...(externalPnpmStoreRoot ? [externalPnpmStoreRoot] : []),
+  ]),
+];
 config.resolver = {
   ...config.resolver,
   blockList: [
