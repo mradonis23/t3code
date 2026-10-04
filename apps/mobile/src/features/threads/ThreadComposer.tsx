@@ -381,7 +381,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   );
   const activeLimitsInlineLabel =
     activeCodexAccount && sessionLimitWindow && weeklyLimitWindow
-      ? `${activeCodexAccount.label} · ${remainingPercent(sessionLimitWindow)}% / ${remainingPercent(weeklyLimitWindow)}%`
+      ? `${activeCodexAccount.label} | ${remainingPercent(sessionLimitWindow)}% / ${remainingPercent(weeklyLimitWindow)}%`
       : (activeCodexAccount?.label ?? null);
   // Answered locally from the last Limits snapshot; the agent never sees it.
   const openUsageLimits = useCallback(() => {

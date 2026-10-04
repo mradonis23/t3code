@@ -403,7 +403,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   );
   const activeLimitsLabel =
     activeCodexAccount && activeSessionWindow && activeWeeklyWindow
-      ? `${activeCodexAccount.label} · ${remainingPercent(activeSessionWindow)}% / ${remainingPercent(activeWeeklyWindow)}%`
+      ? `${activeCodexAccount.label} | ${remainingPercent(activeSessionWindow)}% / ${remainingPercent(activeWeeklyWindow)}%`
       : (activeCodexAccount?.label ?? null);
   // A pending approval or question is part of the key: once it is answered,
   // from this client or any other, the agent resumes and spends quota.
