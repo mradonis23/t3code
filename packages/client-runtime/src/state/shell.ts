@@ -73,7 +73,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
   });
   const awaitingCompletion = yield* Ref.make(false);
   const lastAuthoritativeSession = yield* Ref.make<RpcSession | null>(null);
-  const activeSubscriptionSession = yield* Ref.make<RpcSession | null>(null);
+  const currentSubscriptionSession = yield* Ref.make<RpcSession | null>(null);
   const persistence = yield* Queue.sliding<OrchestrationShellSnapshot>(1);
 
   const persist = Effect.fn("EnvironmentShellState.persist")(function* (
@@ -170,10 +170,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
       error: Option.none(),
     });
     if (item.kind === "snapshot") {
-      const session = yield* Ref.get(activeSubscriptionSession);
-      if (session !== null) {
-        yield* Ref.set(lastAuthoritativeSession, session);
-      }
+      yield* Ref.set(lastAuthoritativeSession, yield* Ref.get(currentSubscriptionSession));
     }
     yield* Queue.offer(persistence, nextSnapshot);
   });
@@ -189,7 +186,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
     subscribeDynamic(
       ORCHESTRATION_WS_METHODS.subscribeShell,
       Effect.fn("EnvironmentShellState.makeSubscribeInput")(function* (session) {
-        yield* Ref.set(activeSubscriptionSession, session);
+        yield* Ref.set(currentSubscriptionSession, session);
         const supportsCompletionMarker = yield* session.initialConfig.pipe(
           Effect.map((config) => config.shellResumeCompletionMarker === true),
           Effect.orElseSucceed(() => false),
@@ -197,33 +194,40 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
         yield* Ref.set(awaitingCompletion, supportsCompletionMarker);
         yield* setSynchronizing;
 
-        // Foreground resubscriptions on the same live session can resume from
-        // the in-memory cursor. A new session reloads the authoritative HTTP
-        // snapshot so a valid cursor cannot preserve incomplete cached data.
-        const hasAuthoritativeSnapshot = (yield* Ref.get(lastAuthoritativeSession)) === session;
-        let canResume = hasAuthoritativeSnapshot;
+        // Every subscription/resubscription reloads the authoritative HTTP
+        // shell before resuming the stream. Mobile clients can remain alive
+        // across a backend restart and otherwise keep a terminal cached shell
+        // (for example "Failed") even after the server has projected a newer
+        // running session. Re-anchoring here makes the server snapshot win on
+        // reconnect and foreground wakeups; the stream then resumes from that
+        // authoritative sequence.
+        const sameAuthoritativeSession = (yield* Ref.get(lastAuthoritativeSession)) === session;
         let current = yield* SubscriptionRef.get(state);
-        if (!hasAuthoritativeSnapshot || Option.isNone(current.snapshot)) {
-          const prepared = yield* SubscriptionRef.get(supervisor.prepared).pipe(
-            Effect.flatMap(
-              Option.match({
-                onSome: Effect.succeed,
-                onNone: () =>
-                  SubscriptionRef.changes(supervisor.prepared).pipe(
-                    Stream.filter(Option.isSome),
-                    Stream.map((value) => value.value),
-                    Stream.runHead,
-                    Effect.map(Option.getOrThrow),
-                  ),
-              }),
-            ),
-          );
-          const httpSnapshot = yield* snapshotLoader.load(prepared);
-          if (Option.isSome(httpSnapshot)) {
+        let canResume = sameAuthoritativeSession && Option.isSome(current.snapshot);
+        const prepared = yield* SubscriptionRef.get(supervisor.prepared).pipe(
+          Effect.flatMap(
+            Option.match({
+              onSome: Effect.succeed,
+              onNone: () =>
+                SubscriptionRef.changes(supervisor.prepared).pipe(
+                  Stream.filter(Option.isSome),
+                  Stream.map((value) => value.value),
+                  Stream.runHead,
+                  Effect.map(Option.getOrThrow),
+                ),
+            }),
+          ),
+        );
+        const httpSnapshot = yield* snapshotLoader.load(prepared);
+        if (Option.isSome(httpSnapshot)) {
+          const shouldApply =
+            Option.isNone(current.snapshot) ||
+            httpSnapshot.value.snapshotSequence >= current.snapshot.value.snapshotSequence;
+          if (shouldApply) {
             yield* applyItem({ kind: "snapshot", snapshot: httpSnapshot.value });
-            canResume = true;
             current = yield* SubscriptionRef.get(state);
           }
+          canResume = true;
         }
 
         // If the authoritative refresh failed, omit the cached cursor so the

@@ -36,6 +36,7 @@ import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/
 import { useThreadSearch } from "../../state/queries";
 import { useThreadListV2Enabled } from "../threads/use-thread-list-v2-enabled";
 import { environmentServerConfigsAtom } from "../../state/server";
+import { AccountLimits } from "../usage/UsageLimitsSection";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import {
   PendingTaskListRow,
@@ -1066,7 +1067,41 @@ export function HomeScreen(props: HomeScreenProps) {
     );
   }
 
-  const listHeader = Platform.OS === "ios" ? null : <HomeTopContentSpacer />;
+  const homeLimitEntries = [...serverConfigs].flatMap(([environmentId, config]) =>
+    config.providers.flatMap((provider) =>
+      provider.driver === "codex" && provider.usageLimits ? [{ environmentId, provider }] : [],
+    ),
+  );
+  const limitsSummary =
+    homeLimitEntries.length === 0 ? null : (
+      <View className="mx-4 mb-3 overflow-hidden rounded-2xl border border-border bg-card">
+        <View className="border-b border-border-subtle px-4 py-2">
+          <Text className="text-xs font-t3-medium text-foreground-muted">CHATGPT LIMITS</Text>
+        </View>
+        {homeLimitEntries.map(({ environmentId, provider }, index) => (
+          <AccountLimits
+            key={`${environmentId}:${provider.instanceId}`}
+            dense
+            first={index === 0}
+            driver={provider.driver}
+            label={provider.auth.label?.trim() || "Codex"}
+            instanceLabel={String(provider.instanceId)}
+            detail={provider.auth.type}
+            limits={provider.usageLimits}
+            now={Date.now()}
+          />
+        ))}
+      </View>
+    );
+  const listHeader =
+    Platform.OS === "ios" ? (
+      limitsSummary
+    ) : (
+      <>
+        <HomeTopContentSpacer />
+        {limitsSummary}
+      </>
+    );
 
   // Project scoping lives in the header filter menu (no inline chip row on
   // mobile — the menu is the one filter surface).

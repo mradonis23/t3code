@@ -1,4 +1,4 @@
-import { limitsNotice } from "@t3tools/shared/usageLimits";
+import { formatResetsIn, limitsNotice, remainingPercent } from "@t3tools/shared/usageLimits";
 import { GaugeIcon, LoaderIcon, RefreshCwIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
@@ -83,6 +83,60 @@ function CodexLimitProviderCard({
  * typed provider snapshots as Usage -> Limits and the /usage-limits composer
  * command so desktop, web, and mobile never disagree about the account state.
  */
+export function SidebarCodexLimitsSummary() {
+  const { environments } = useEnvironments();
+  const entries = useMemo<ReadonlyArray<CodexLimitEntry>>(
+    () =>
+      environments.flatMap((environment) =>
+        deriveProviderInstanceEntries(environment.serverConfig?.providers ?? []).flatMap(
+          (providerEntry) => {
+            const provider = providerEntry.snapshot;
+            if (String(providerEntry.driverKind) !== "codex" || !provider.usageLimits) return [];
+            return [
+              {
+                environmentId: environment.environmentId,
+                environmentLabel: environment.label,
+                accountLabel: providerEntry.displayName,
+                provider,
+              },
+            ];
+          },
+        ),
+      ),
+    [environments],
+  );
+  if (entries.length === 0) return null;
+  const now = Date.now();
+  return (
+    <div
+      className="mb-1 grid gap-1.5 rounded-lg border border-border/60 bg-sidebar-accent/35 px-2.5 py-2"
+      aria-label="Codex subscription limits summary"
+    >
+      {entries.map((entry) => {
+        const windows = entry.provider.usageLimits?.windows ?? [];
+        return (
+          <div key={`${entry.environmentId}:${entry.provider.instanceId}`} className="grid gap-0.5">
+            <div className="truncate text-[11px] font-medium text-sidebar-foreground">
+              {entry.accountLabel}
+            </div>
+            <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] tabular-nums text-muted-foreground">
+              {windows.map((window) => (
+                <span key={window.id}>
+                  {window.label}:{" "}
+                  <strong className="font-semibold text-sidebar-foreground">
+                    {remainingPercent(window)}%
+                  </strong>
+                  {formatResetsIn(window, now) ? ` · ${formatResetsIn(window, now)}` : ""}
+                </span>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function SidebarCodexLimitsPopover() {
   const { environments } = useEnvironments();
   const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {

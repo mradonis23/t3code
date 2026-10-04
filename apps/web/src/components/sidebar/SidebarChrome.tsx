@@ -31,7 +31,7 @@ import {
 } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { readPullRequestListPreferences } from "../pullRequest/pullRequestListPreferences";
-import { SidebarCodexLimitsPopover } from "./SidebarCodexLimitsPopover";
+import { SidebarCodexLimitsPopover, SidebarCodexLimitsSummary } from "./SidebarCodexLimitsPopover";
 import { SidebarProviderUpdatePill } from "./SidebarProviderUpdatePill";
 import { SidebarUpdateArchitectureWarning, SidebarUpdatePill } from "./SidebarUpdatePill";
 
@@ -228,6 +228,7 @@ export const SidebarChromeFooter = memo(function SidebarChromeFooter() {
     <SidebarFooter className="p-[var(--sidebar-content-inset)]">
       <SidebarProviderUpdatePill />
       <SidebarUpdateArchitectureWarning />
+      <SidebarCodexLimitsSummary />
       <SidebarUtilityMenu />
     </SidebarFooter>
   );
