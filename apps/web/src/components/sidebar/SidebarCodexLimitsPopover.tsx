@@ -11,6 +11,7 @@ import { useCallback, useMemo, useState } from "react";
 import type { EnvironmentId, ServerProvider } from "@t3tools/contracts";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import { useEnvironments } from "../../state/environments";
+import { useThreadShells } from "../../state/entities";
 import { environmentPresentations } from "../../state/presentation";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -25,6 +26,21 @@ interface CodexLimitEntry {
   readonly environmentLabel: string;
   readonly accountLabel: string;
   readonly provider: ServerProvider;
+}
+
+function codexAccountPresentation(instanceId: string): {
+  readonly label: string;
+  readonly color: string;
+} {
+  switch (instanceId) {
+    case "codex_mom":
+      return { label: "Mom's Codex", color: "#FF9F0A" };
+    case "codex_nena":
+      return { label: "Nana's Codex", color: "#30D158" };
+    case "codex":
+    default:
+      return { label: "Dad's Codex", color: "#0A84FF" };
+  }
 }
 
 function CodexLimitProviderCard({
@@ -42,6 +58,7 @@ function CodexLimitProviderCard({
 
   const planLabel = provider.auth.label ?? provider.auth.type ?? null;
   const notice = limitsNotice(limits);
+  const account = codexAccountPresentation(String(provider.instanceId));
 
   return (
     <section className="grid gap-3 rounded-lg border border-border/60 bg-background/35 p-3">
@@ -49,8 +66,8 @@ function CodexLimitProviderCard({
         <ProviderInstanceIcon
           driverKind={provider.driver}
           displayName={entry.accountLabel}
-          accentColor={provider.accentColor}
-          showBadge={Boolean(provider.accentColor)}
+          accentColor={account.color}
+          showBadge
           className="size-5"
           iconClassName="size-4"
           badgeClassName="right-[-0.125rem] bottom-[-0.125rem] h-3 min-w-3 px-0.5 text-[7px]"
@@ -60,7 +77,7 @@ function CodexLimitProviderCard({
           <div className="truncate text-[11px] text-muted-foreground">
             {[planLabel, showEnvironment ? entry.environmentLabel : null]
               .filter(Boolean)
-              .join(" Â· ")}
+              .join(" Ã‚Â· ")}
           </div>
         </div>
       </div>
@@ -92,44 +109,101 @@ function CodexLimitProviderCard({
  */
 export function SidebarCodexLimitsSummary() {
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
+  const threadShells = useThreadShells();
+  const [expanded, setExpanded] = useState(false);
   const accounts = collectLimitAccounts(presentations).filter(
     (account) => account.driver === "codex",
   );
+  const activeRunningThread =
+    [...threadShells]
+      .filter(
+        (thread) => thread.session?.status === "running" || thread.session?.status === "starting",
+      )
+      .sort(
+        (left, right) =>
+          Date.parse(right.session?.updatedAt ?? right.updatedAt ?? right.createdAt) -
+          Date.parse(left.session?.updatedAt ?? left.updatedAt ?? left.createdAt),
+      )[0] ?? null;
+  const activeInstanceId =
+    activeRunningThread?.session?.providerInstanceId ??
+    activeRunningThread?.modelSelection.instanceId ??
+    null;
+  const activeAccount =
+    activeInstanceId === null
+      ? null
+      : (accounts.find(
+          (account) =>
+            account.redeem?.instanceId === activeInstanceId &&
+            account.redeem.environmentId === activeRunningThread?.environmentId,
+        ) ?? null);
+  const visibleAccounts = expanded ? accounts : activeAccount ? [activeAccount] : [];
   const now = Date.now();
 
   return (
     <div
-      className="mb-1 grid gap-1.5 rounded-lg border border-border/60 bg-sidebar-accent/35 px-2.5 py-2"
+      className="mb-1 grid gap-1.5 overflow-hidden rounded-lg border border-border/60 bg-sidebar-accent/35"
       aria-label="Codex subscription limits summary"
     >
-      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-        ChatGPT limits
-      </div>
-      {accounts.length === 0 ? (
-        <div className="text-[10px] text-muted-foreground">Refreshing subscription limits…</div>
-      ) : (
-        accounts.map((account) => (
-          <div key={account.key} className="grid gap-0.5">
-            <div className="truncate text-[11px] font-medium text-sidebar-foreground">
-              {account.email ?? account.displayName ?? "Codex"}
-            </div>
-            <div className="truncate text-[10px] text-muted-foreground">
-              {[account.displayName ?? "Codex", account.plan].filter(Boolean).join(" · ")}
-            </div>
-            <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] tabular-nums text-muted-foreground">
-              {account.limits.windows.map((window) => (
-                <span key={window.id}>
-                  {window.label}:{" "}
-                  <strong className="font-semibold text-sidebar-foreground">
-                    {remainingPercent(window)}%
-                  </strong>
-                  {formatResetsIn(window, now) ? ` · ${formatResetsIn(window, now)}` : ""}
-                </span>
-              ))}
-            </div>
+      <button
+        type="button"
+        className="flex items-center justify-between gap-2 px-2.5 py-2 text-left hover:bg-sidebar-accent/55"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((current) => !current)}
+      >
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          ChatGPT limits
+        </span>
+        <span className="text-[10px] font-medium text-muted-foreground">
+          {expanded
+            ? "Show active"
+            : accounts.length > 1
+              ? `Show all ${accounts.length}`
+              : "Details"}
+        </span>
+      </button>
+      <div className="grid gap-1.5 border-t border-border/50 px-2.5 py-2">
+        {accounts.length === 0 ? (
+          <div className="text-[10px] text-muted-foreground">Refreshing subscription limitsâ€¦</div>
+        ) : visibleAccounts.length === 0 ? (
+          <div className="text-[10px] text-muted-foreground">
+            No Codex session is running. Open to view all account limits.
           </div>
-        ))
-      )}
+        ) : (
+          visibleAccounts.map((account) => {
+            const identity = codexAccountPresentation(
+              String(account.redeem?.instanceId ?? "codex"),
+            );
+            return (
+              <div key={account.key} className="grid gap-0.5">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span
+                    className="size-2 shrink-0 rounded-full"
+                    style={{ backgroundColor: identity.color }}
+                    aria-hidden="true"
+                  />
+                  <div className="truncate text-[11px] font-medium text-sidebar-foreground">
+                    {identity.label}
+                  </div>
+                </div>
+                <div className="truncate text-[10px] text-muted-foreground">
+                  {[account.email, account.plan].filter(Boolean).join(" Â· ")}
+                </div>
+                <div className="flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] tabular-nums text-muted-foreground">
+                  {account.limits.windows.map((window) => (
+                    <span key={window.id}>
+                      {window.label}:{" "}
+                      <strong className="font-semibold text-sidebar-foreground">
+                        {remainingPercent(window)}%
+                      </strong>
+                      {formatResetsIn(window, now) ? ` Â· ${formatResetsIn(window, now)}` : ""}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }
@@ -154,7 +228,7 @@ export function SidebarCodexLimitsPopover() {
             {
               environmentId: environment.environmentId,
               environmentLabel: environment.label,
-              accountLabel: providerEntry.displayName,
+              accountLabel: codexAccountPresentation(String(provider.instanceId)).label,
               provider,
             },
           ];
