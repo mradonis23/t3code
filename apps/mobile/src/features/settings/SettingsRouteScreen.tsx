@@ -616,6 +616,13 @@ function AutoSettleSettingsRows() {
     <>
       <SettingsSwitchRow
         icon="arrow.triangle.branch"
+        label="Automatic Codex account failover"
+        subtitle="Continue on another Codex account when the current account reaches its usage limit"
+        value={referenceSettings.automaticCodexAccountFailover}
+        onValueChange={(value) => writeToAll({ automaticCodexAccountFailover: value })}
+      />
+      <SettingsSwitchRow
+        icon="arrow.triangle.branch"
         label="Auto-settle merged threads"
         value={referenceSettings.sidebarAutoSettleOnMerge}
         onValueChange={(value) => writeToAll({ sidebarAutoSettleOnMerge: value })}

@@ -11,7 +11,7 @@ import type { ComposerBannerStackItem } from "./ComposerBannerStack";
 function accountLabel(account: UsageLimitsReport["accounts"][number]): string {
   if (account.driver === "codex" && account.instanceId) {
     if (account.instanceId === "codex_mom") return "Mom's Codex";
-    if (account.instanceId === "codex_nena") return "Nana's Codex";
+    if (account.instanceId === "codex_nena") return "Nena's Codex";
     if (account.instanceId === "codex") return "Dad's Codex";
   }
   if (!account.instanceId) return account.label;

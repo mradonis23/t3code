@@ -47,7 +47,7 @@ function codexAccountPresentation(instanceId: string): {
     case "codex_mom":
       return { label: "Mom's Codex", color: "#FF9F0A" };
     case "codex_nena":
-      return { label: "Nana's Codex", color: "#30D158" };
+      return { label: "Nena's Codex", color: "#30D158" };
     case "codex":
     default:
       return { label: "Dad's Codex", color: "#0A84FF" };

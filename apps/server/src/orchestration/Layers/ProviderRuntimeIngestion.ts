@@ -29,8 +29,10 @@ import * as Predicate from "effect/Predicate";
 import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import { formatTokens } from "@t3tools/shared/usageFormat";
+import { buildCheckpointContinuation } from "@t3tools/shared/checkpointContinuation";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
 import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
 import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
 import { ProjectionThreadActivityRepository } from "../../persistence/Services/ProjectionThreadActivities.ts";
@@ -52,6 +54,11 @@ import { projectActivityPayload } from "../ActivityPayloadProjection.ts";
 import { forkParked } from "../../serverActivation.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { canReplaceThreadTitle } from "../threadTitles.ts";
+import {
+  exhaustedProviderRetryAfterMs,
+  isCodexUsageExhaustionMessage,
+  selectCodexFailoverProvider,
+} from "../codexAccountFailover.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerTaskKey = (threadId: ThreadId, taskId: string) => `${threadId}:${taskId}`;
@@ -904,6 +911,7 @@ const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const providerService = yield* ProviderService;
+  const providerRegistry = yield* ProviderRegistry;
   const projectionThreadMessages = yield* ProjectionThreadMessageRepository;
   const projectionThreadProposedPlans = yield* ProjectionThreadProposedPlanRepository;
   const projectionTurnRepository = yield* ProjectionTurnRepository;
@@ -1474,8 +1482,250 @@ const make = Effect.gen(function* () {
     },
   );
 
+  const codexFailoverTargetByThread = new Map<string, string>();
+  const codexExhaustedUntilByThread = new Map<string, Map<string, number>>();
+  const codexNoTargetNotifiedUntilByThread = new Map<string, number>();
+
+  const usageLimitFailureMessage = (event: ProviderRuntimeEvent): string | null => {
+    if (event.type === "turn.completed" && event.payload.state === "failed") {
+      return event.payload.errorMessage ?? null;
+    }
+    if (event.type === "session.state.changed" && event.payload.state === "error") {
+      return event.payload.reason ?? null;
+    }
+    return null;
+  };
+
+  const blockedCodexInstances = (threadId: ThreadId, nowMs: number): ReadonlySet<string> => {
+    const key = String(threadId);
+    const blocked = codexExhaustedUntilByThread.get(key);
+    if (!blocked) return new Set<string>();
+    for (const [instanceId, retryAfterMs] of blocked) {
+      if (retryAfterMs <= nowMs) blocked.delete(instanceId);
+    }
+    if (blocked.size === 0) {
+      codexExhaustedUntilByThread.delete(key);
+      return new Set<string>();
+    }
+    return new Set(blocked.keys());
+  };
+
+  const markCodexInstanceExhausted = (
+    threadId: ThreadId,
+    instanceId: string,
+    retryAfterMs: number,
+  ) => {
+    const key = String(threadId);
+    const blocked = codexExhaustedUntilByThread.get(key) ?? new Map<string, number>();
+    blocked.set(instanceId, retryAfterMs);
+    codexExhaustedUntilByThread.set(key, blocked);
+  };
+
+  const codexAccountLabel = (instanceId: string, displayName?: string): string => {
+    if (instanceId === "codex") return "Dad's Codex";
+    if (instanceId === "codex_mom") return "Mom's Codex";
+    if (instanceId === "codex_nena") return "Nena's Codex";
+    if (displayName?.trim()) {
+      return /codex$/iu.test(displayName.trim())
+        ? displayName.trim()
+        : `${displayName.trim()}'s Codex`;
+    }
+    return instanceId;
+  };
+
+  const maybeAutoFailoverCodexUsageLimit = Effect.fn("maybeAutoFailoverCodexUsageLimit")(function* (
+    event: ProviderRuntimeEvent,
+  ) {
+    const failureMessage = usageLimitFailureMessage(event);
+    if (!failureMessage || event.provider !== "codex") return;
+
+    const settings = yield* serverSettingsService.getSettings.pipe(
+      Effect.orElseSucceed(() => null),
+    );
+    if (settings?.automaticCodexAccountFailover !== true) return;
+
+    const thread = yield* resolveThreadRuntimeContext(event.threadId);
+    if (!thread) return;
+
+    if (
+      event.providerInstanceId !== undefined &&
+      thread.session?.providerInstanceId !== undefined &&
+      event.providerInstanceId !== thread.session.providerInstanceId
+    ) {
+      return;
+    }
+
+    const threadKey = String(thread.id);
+    if (codexFailoverTargetByThread.has(threadKey)) return;
+
+    const hintedInstanceId = event.providerInstanceId ?? thread.session?.providerInstanceId;
+    const providers = yield* providerRegistry.getProviders;
+    const hintedProvider =
+      hintedInstanceId === undefined
+        ? undefined
+        : providers.find((provider) => provider.instanceId === hintedInstanceId);
+    if (!isCodexUsageExhaustionMessage(failureMessage, hintedProvider)) return;
+
+    // Full thread hydration is intentionally delayed until quota exhaustion is
+    // confirmed. Ordinary provider/runtime failures stay on the lightweight
+    // runtime-context path used by the rest of ingestion.
+    const detail = Option.getOrUndefined(
+      yield* projectionSnapshotQuery.getThreadDetailById(thread.id),
+    );
+    if (!detail) return;
+
+    const currentInstanceId = hintedInstanceId ?? detail.modelSelection.instanceId;
+    const currentProvider =
+      hintedProvider ?? providers.find((provider) => provider.instanceId === currentInstanceId);
+
+    const nowMs = Date.parse(event.createdAt);
+    markCodexInstanceExhausted(
+      thread.id,
+      String(currentInstanceId),
+      exhaustedProviderRetryAfterMs(currentProvider, nowMs),
+    );
+    const blocked = blockedCodexInstances(thread.id, nowMs);
+    const target = selectCodexFailoverProvider({
+      providers,
+      currentInstanceId,
+      modelSelection: detail.modelSelection,
+      blockedInstanceIds: blocked,
+    });
+
+    if (!target) {
+      const suppressUntil = codexNoTargetNotifiedUntilByThread.get(threadKey) ?? 0;
+      if (suppressUntil > nowMs) return;
+      codexNoTargetNotifiedUntilByThread.set(threadKey, nowMs + 60_000);
+      yield* orchestrationEngine.dispatch({
+        type: "thread.activity.append",
+        commandId: yield* providerCommandId(event, "codex-account-failover-unavailable"),
+        threadId: thread.id,
+        activity: {
+          id: EventId.make(`codex-failover-unavailable:${event.eventId}`),
+          tone: "error",
+          kind: "codex.account.failover.unavailable",
+          summary: "Automatic Codex failover paused",
+          payload: {
+            providerInstanceId: currentInstanceId,
+            reason: failureMessage,
+            detail:
+              "No other configured Codex account currently reports usable session and weekly capacity.",
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          createdAt: event.createdAt,
+        },
+        createdAt: event.createdAt,
+      });
+      return;
+    }
+
+    const continuationThread = {
+      ...detail,
+      session: {
+        ...(detail.session ?? {
+          threadId: detail.id,
+          providerName: event.provider,
+          runtimeMode: detail.runtimeMode,
+          activeTurnId: null,
+          updatedAt: event.createdAt,
+        }),
+        status: "error" as const,
+        providerName: event.provider,
+        providerInstanceId: currentInstanceId,
+        activeTurnId: null,
+        lastError: failureMessage,
+        updatedAt: event.createdAt,
+      },
+    };
+    const continuation = buildCheckpointContinuation({
+      thread: continuationThread,
+      connectionState: "connected",
+      gitStatus: null,
+    });
+    if (!continuation || continuation.kind !== "usage-limit") {
+      yield* Effect.logWarning("automatic Codex failover could not build continuation", {
+        threadId: thread.id,
+        providerInstanceId: currentInstanceId,
+        reason: failureMessage,
+      });
+      return;
+    }
+
+    const fromLabel = codexAccountLabel(String(currentInstanceId), currentProvider?.displayName);
+    const toLabel = codexAccountLabel(String(target.instanceId), target.displayName);
+    codexFailoverTargetByThread.set(threadKey, String(target.instanceId));
+    codexNoTargetNotifiedUntilByThread.delete(threadKey);
+
+    yield* Effect.gen(function* () {
+      yield* orchestrationEngine.dispatch({
+        type: "thread.activity.append",
+        commandId: yield* providerCommandId(event, "codex-account-failover"),
+        threadId: thread.id,
+        activity: {
+          id: EventId.make(`codex-failover:${event.eventId}:${target.instanceId}`),
+          tone: "info",
+          kind: "codex.account.failover",
+          summary: `${fromLabel} limit reached → continuing on ${toLabel}`,
+          payload: {
+            fromProviderInstanceId: currentInstanceId,
+            toProviderInstanceId: target.instanceId,
+            reason: failureMessage,
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          createdAt: event.createdAt,
+        },
+        createdAt: event.createdAt,
+      });
+
+      yield* orchestrationEngine.dispatch({
+        type: "thread.turn.start",
+        commandId: yield* providerCommandId(event, "codex-account-failover-turn"),
+        threadId: thread.id,
+        message: {
+          messageId: MessageId.make(`codex-failover:${event.eventId}:${target.instanceId}`),
+          role: "user",
+          text: continuation.prompt,
+          attachments: [],
+        },
+        modelSelection: {
+          ...detail.modelSelection,
+          instanceId: target.instanceId,
+        },
+        runtimeMode: detail.runtimeMode,
+        interactionMode: detail.interactionMode,
+        createdAt: event.createdAt,
+      });
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.sync(() => {
+          codexFailoverTargetByThread.delete(threadKey);
+        }).pipe(
+          Effect.andThen(
+            Effect.logWarning("automatic Codex account failover failed", {
+              threadId: thread.id,
+              fromProviderInstanceId: currentInstanceId,
+              toProviderInstanceId: target.instanceId,
+              cause: Cause.pretty(cause),
+            }),
+          ),
+        ),
+      ),
+    );
+  });
+
   const processRuntimeEvent = (event: ProviderRuntimeEvent) =>
     Effect.gen(function* () {
+      const pendingFailoverTarget = codexFailoverTargetByThread.get(String(event.threadId));
+      if (
+        pendingFailoverTarget !== undefined &&
+        event.providerInstanceId !== undefined &&
+        String(event.providerInstanceId) === pendingFailoverTarget &&
+        (event.type === "session.started" ||
+          event.type === "thread.started" ||
+          event.type === "turn.started")
+      ) {
+        codexFailoverTargetByThread.delete(String(event.threadId));
+      }
       if (event.type === "content.delta" && event.payload.streamKind !== "assistant_text") {
         return;
       }
@@ -2140,6 +2390,8 @@ const make = Effect.gen(function* () {
           ),
         ),
       ).pipe(Effect.asVoid);
+
+      yield* maybeAutoFailoverCodexUsageLimit(event);
     });
 
   const processDomainEvent = (_event: TurnStartRequestedDomainEvent) => Effect.void;

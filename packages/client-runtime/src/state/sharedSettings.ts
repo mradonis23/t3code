@@ -22,6 +22,7 @@ import type { EnvironmentConnectionPhase } from "../connection/presentation.ts";
 /** Server keys that hold a user preference rather than machine config. */
 const SHARED_SERVER_SETTING_KEYS = [
   "continueThreadsAfterServerUpdate",
+  "automaticCodexAccountFailover",
   "sidebarAutoSettleAfterDays",
   "sidebarAutoSettleOnMerge",
   "newWorktreesStartFromOrigin",

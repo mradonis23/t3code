@@ -567,6 +567,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate
         ? ["Continue threads after restarts"]
         : []),
+      ...(settings.automaticCodexAccountFailover !==
+      DEFAULT_UNIFIED_SETTINGS.automaticCodexAccountFailover
+        ? ["Automatic Codex account failover"]
+        : []),
       ...(isBackgroundActivityDirty ? ["Background activity"] : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
         ? ["New thread mode"]
@@ -632,6 +636,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.enableLegacyTokenStreaming,
       settings.enableProviderUpdateChecks,
       settings.continueThreadsAfterServerUpdate,
+      settings.automaticCodexAccountFailover,
       settings.sidebarAutoSettleAfterDays,
       settings.sidebarAutoSettleOnMerge,
       settings.sidebarProjectGroupingMode,
@@ -728,6 +733,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       enableLegacyTokenStreaming: DEFAULT_UNIFIED_SETTINGS.enableLegacyTokenStreaming,
       enableProviderUpdateChecks: DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks,
       continueThreadsAfterServerUpdate: DEFAULT_UNIFIED_SETTINGS.continueThreadsAfterServerUpdate,
+      automaticCodexAccountFailover: DEFAULT_UNIFIED_SETTINGS.automaticCodexAccountFailover,
       backgroundActivity: DEFAULT_UNIFIED_SETTINGS.backgroundActivity,
       backgroundActivityProfile: DEFAULT_UNIFIED_SETTINGS.backgroundActivityProfile,
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
@@ -2124,6 +2130,35 @@ export function GeneralSettingsPanel() {
                 });
               }}
               aria-label="Project grouping"
+            />
+          }
+        />
+
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("automatic-codex-account-failover")}
+          description="When a Codex account reaches its usage limit, continue the same task automatically on the configured Codex account with the best available capacity."
+          resetAction={
+            settings.automaticCodexAccountFailover !==
+            DEFAULT_UNIFIED_SETTINGS.automaticCodexAccountFailover ? (
+              <SettingResetButton
+                label="automatic Codex account failover"
+                onClick={() =>
+                  updateSettings({
+                    automaticCodexAccountFailover:
+                      DEFAULT_UNIFIED_SETTINGS.automaticCodexAccountFailover,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.automaticCodexAccountFailover}
+              onCheckedChange={(checked) =>
+                updateSettings({ automaticCodexAccountFailover: Boolean(checked) })
+              }
+              aria-label="Automatic Codex account failover"
             />
           }
         />

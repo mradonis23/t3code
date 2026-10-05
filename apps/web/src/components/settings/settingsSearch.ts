@@ -161,6 +161,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["combine matching repositories environments sidebar"],
   },
   {
+    id: "automatic-codex-account-failover",
+    title: "Automatic Codex account failover",
+    to: "/settings/general",
+    searchTerms: ["codex account usage limit quota continue switch dad mom nena"],
+  },
+  {
     id: "auto-settle-inactive-threads",
     title: "Auto-settle inactive threads",
     to: "/settings/general",

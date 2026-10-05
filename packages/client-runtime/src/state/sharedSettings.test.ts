@@ -43,6 +43,7 @@ describe("splitSharedServerPatch", () => {
       sidebarAutoSettleAfterDays: 7,
       sidebarAutoSettleOnMerge: false,
       continueThreadsAfterServerUpdate: true,
+      automaticCodexAccountFailover: false,
       enableAgentBrowserAccess: false,
       defaultThreadEnvMode: "worktree",
       newWorktreesStartFromOrigin: true,
@@ -51,6 +52,7 @@ describe("splitSharedServerPatch", () => {
       sidebarAutoSettleAfterDays: 7,
       sidebarAutoSettleOnMerge: false,
       continueThreadsAfterServerUpdate: true,
+      automaticCodexAccountFailover: false,
       newWorktreesStartFromOrigin: true,
     });
     expect(localPatch).toEqual({
@@ -65,6 +67,7 @@ describe("pickSharedServerSettings", () => {
     expect(
       Object.keys(pickSharedServerSettings(DEFAULT_SERVER_SETTINGS, restartCapabilities)).sort(),
     ).toEqual([
+      "automaticCodexAccountFailover",
       "continueThreadsAfterServerUpdate",
       "newWorktreesStartFromOrigin",
       "sidebarAutoSettleAfterDays",

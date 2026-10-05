@@ -178,13 +178,24 @@ function latestFailedCommand(evidence: ReadonlyArray<CommandEvidence>): CommandE
   return null;
 }
 
+export function isUsageLimitInterruptionError(message: string): boolean {
+  const normalized = message.trim().toLocaleLowerCase();
+  return (
+    normalized.includes("usage limit") ||
+    normalized.includes("usage cap") ||
+    /\bquota\b.{0,80}\b(?:exhausted|reached|used\s+up)\b/iu.test(normalized) ||
+    /\b(?:exhausted|reached)\b.{0,80}\bquota\b/iu.test(normalized) ||
+    /\brate\s+limit(?:ed)?\b|\brate\s+limit\s+(?:reached|exceeded)\b/iu.test(normalized)
+  );
+}
+
 function detectInterruptionKind(input: {
   readonly thread: OrchestrationThread;
   readonly connectionState: ConnectionState;
 }): CheckpointInterruptionKind | null {
   const { thread } = input;
   const error = thread.session?.lastError?.trim().toLocaleLowerCase() ?? "";
-  if (error.includes("usage limit")) return "usage-limit";
+  if (isUsageLimitInterruptionError(error)) return "usage-limit";
   if (thread.session?.status === "error" || thread.latestTurn?.state === "error") {
     return "runtime-error";
   }

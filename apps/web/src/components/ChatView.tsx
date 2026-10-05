@@ -2751,7 +2751,7 @@ export default function ChatView(props: ChatViewProps) {
       ? activeProviderStatus.instanceId === "codex_mom"
         ? { label: "Mom's Codex", color: "#FF9F0A" }
         : activeProviderStatus.instanceId === "codex_nena"
-          ? { label: "Nana's Codex", color: "#30D158" }
+          ? { label: "Nena's Codex", color: "#30D158" }
           : { label: "Dad's Codex", color: "#0A84FF" }
       : null;
   const activeSessionLimit = activeProviderStatus?.usageLimits?.windows.find(

@@ -21,6 +21,7 @@ import {
   ProjectId,
   ProviderItemId,
   RuntimeRequestId,
+  type ServerProvider,
   type ServerSettings,
   ThreadId,
   TurnId,
@@ -62,6 +63,7 @@ import { ProviderRuntimeIngestionService } from "../Services/ProviderRuntimeInge
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { makeProviderRegistryLayer } from "../../provider/testUtils/providerRegistryMock.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { makeSqlStatementCounter } from "../../../integration/SqlStatementCounter.integration.ts";
 
@@ -203,6 +205,56 @@ function createProviderServiceHarness() {
   };
 }
 
+function codexProvider(input: {
+  id: string;
+  sessionLeft: number;
+  weeklyLeft: number;
+  displayName?: string;
+}): ServerProvider {
+  const checkedAt = "2026-01-01T00:00:00.000Z";
+  return {
+    instanceId: ProviderInstanceId.make(input.id),
+    driver: ProviderDriverKind.make("codex"),
+    ...(input.displayName ? { displayName: input.displayName } : {}),
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt,
+    availability: "available",
+    models: [
+      {
+        slug: "gpt-5-codex",
+        name: "GPT-5 Codex",
+        isCustom: false,
+        capabilities: null,
+      },
+    ],
+    slashCommands: [],
+    skills: [],
+    usageLimits: {
+      checkedAt,
+      windows: [
+        {
+          id: "session",
+          kind: "session",
+          label: "Session",
+          usedPercent: 100 - input.sessionLeft,
+          resetsAt: "2026-01-01T04:00:00.000Z",
+        },
+        {
+          id: "weekly",
+          kind: "weekly",
+          label: "Weekly",
+          usedPercent: 100 - input.weeklyLeft,
+          resetsAt: "2026-01-08T00:00:00.000Z",
+        },
+      ],
+    },
+  };
+}
+
 type ProviderRuntimeTestReadModel = OrchestrationReadModel;
 type ProviderRuntimeTestThread = ProviderRuntimeTestReadModel["threads"][number];
 type ProviderRuntimeTestMessage = ProviderRuntimeTestThread["messages"][number];
@@ -264,6 +316,8 @@ describe("ProviderRuntimeIngestion", () => {
     serverSettings?: Partial<ServerSettings>;
     threadTitle?: string;
     workspaceSubdirectory?: string;
+    providers?: ReadonlyArray<ServerProvider>;
+    allowThreadDetailHydration?: boolean;
   }) {
     const repositoryRoot = makeTempDir("t3-provider-project-");
     NodeChildProcess.execFileSync("git", ["init", "--initial-branch=main"], {
@@ -292,8 +346,10 @@ describe("ProviderRuntimeIngestion", () => {
         const query = yield* ProjectionSnapshotQuery;
         return ProjectionSnapshotQuery.of({
           ...query,
-          getThreadDetailById: () =>
-            Effect.die("provider runtime ingestion must not hydrate thread detail"),
+          getThreadDetailById:
+            options?.allowThreadDetailHydration === true
+              ? query.getThreadDetailById
+              : () => Effect.die("provider runtime ingestion must not hydrate thread detail"),
         });
       }),
     ).pipe(Layer.provide(projectionSnapshotLayer));
@@ -306,6 +362,7 @@ describe("ProviderRuntimeIngestion", () => {
       Layer.provideMerge(ThreadPlanProgress.layer),
       Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
+      Layer.provideMerge(makeProviderRegistryLayer(options?.providers ?? [])),
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
       Layer.provideMerge(CheckpointStore.layer.pipe(Layer.provide(VcsDriverRegistry.layer))),
       Layer.provideMerge(VcsProcess.layer),
@@ -398,6 +455,98 @@ describe("ProviderRuntimeIngestion", () => {
       drain,
     };
   }
+
+  it("automatically continues a usage-limited Codex turn on the best alternate account", async () => {
+    const dad = codexProvider({
+      id: "codex",
+      sessionLeft: 0,
+      weeklyLeft: 9,
+      displayName: "Dad",
+    });
+    const mom = codexProvider({
+      id: "codex_mom",
+      sessionLeft: 100,
+      weeklyLeft: 53,
+      displayName: "Mom",
+    });
+    const nena = codexProvider({
+      id: "codex_nena",
+      sessionLeft: 100,
+      weeklyLeft: 57,
+      displayName: "Nena",
+    });
+    const harness = await createHarness({
+      providers: [dad, mom, nena],
+      allowThreadDetailHydration: true,
+      serverSettings: { automaticCodexAccountFailover: true },
+    });
+    const threadId = asThreadId("thread-1");
+    const turnId = asTurnId("turn-usage-limit");
+    const startedAt = "2026-01-01T00:00:01.000Z";
+
+    await harness.dispatch({
+      type: "thread.session.set",
+      commandId: CommandId.make("cmd-failover-seed-session"),
+      threadId,
+      session: {
+        threadId,
+        status: "running",
+        providerName: "codex",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        runtimeMode: "approval-required",
+        activeTurnId: turnId,
+        updatedAt: startedAt,
+        lastError: null,
+      },
+      createdAt: startedAt,
+    });
+    harness.setProviderSession({
+      provider: ProviderDriverKind.make("codex"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      status: "running",
+      runtimeMode: "approval-required",
+      threadId,
+      activeTurnId: turnId,
+      createdAt: startedAt,
+      updatedAt: startedAt,
+    });
+
+    await harness.emitAndDrain([
+      {
+        type: "turn.completed",
+        eventId: asEventId("evt-codex-usage-limit"),
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        threadId,
+        createdAt: "2026-01-01T00:00:02.000Z",
+        turnId,
+        payload: {
+          state: "failed",
+          errorMessage: "Usage limit reached. Try again later.",
+        },
+      },
+    ]);
+
+    const thread = await waitForThread(harness.readModel, (entry) =>
+      entry.activities.some((activity) => activity.kind === "codex.account.failover"),
+    );
+    const failover = thread.activities.find(
+      (activity) => activity.kind === "codex.account.failover",
+    );
+    expect(failover?.summary).toBe("Dad's Codex limit reached → continuing on Nena's Codex");
+    expect(failover?.payload).toMatchObject({
+      fromProviderInstanceId: ProviderInstanceId.make("codex"),
+      toProviderInstanceId: ProviderInstanceId.make("codex_nena"),
+    });
+    expect(
+      thread.messages.some(
+        (message) =>
+          message.role === "user" &&
+          message.text.startsWith("CONTINUE FROM EXACT CHECKPOINT") &&
+          message.text.includes("Usage limit reached. Try again later."),
+      ),
+    ).toBe(true);
+  });
 
   it("maps turn started/completed events into thread session updates", async () => {
     const harness = await createHarness();

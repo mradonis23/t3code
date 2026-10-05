@@ -8,7 +8,7 @@ export interface CodexAccountPresentation {
 const CODEX_ACCOUNT_PRESENTATIONS: Readonly<Record<string, CodexAccountPresentation>> = {
   codex: { label: "Dad's Codex", color: "#0A84FF" },
   codex_mom: { label: "Mom's Codex", color: "#FF9F0A" },
-  codex_nena: { label: "Nana's Codex", color: "#30D158" },
+  codex_nena: { label: "Nena's Codex", color: "#30D158" },
 };
 
 export function codexAccountPresentation(

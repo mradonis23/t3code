@@ -20,6 +20,16 @@ const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 const decodeClaudeSettings = Schema.decodeUnknownSync(ClaudeSettings);
 
+describe("ServerSettings automatic Codex account failover", () => {
+  it("defaults on and accepts an explicit patch", () => {
+    expect(decodeServerSettings({}).automaticCodexAccountFailover).toBe(true);
+    expect(
+      decodeServerSettingsPatch({ automaticCodexAccountFailover: false })
+        .automaticCodexAccountFailover,
+    ).toBe(false);
+  });
+});
+
 describe("ServerSettings usage price overrides", () => {
   const prices = { inputCostPerMillionTokens: 2, outputCostPerMillionTokens: 8 };
 
