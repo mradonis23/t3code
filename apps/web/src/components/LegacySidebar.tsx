@@ -2912,7 +2912,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     () => sortedProjects.filter((project) => project.hierarchy === null),
     [sortedProjects],
   );
-  const showHierarchy = !isManualProjectSorting && hierarchyGroups.length > 0;
+  const showHierarchy = hierarchyGroups.length > 0;
 
   const renderProjectRow = (project: SidebarProjectSnapshot) => (
     <SidebarProjectListRow
