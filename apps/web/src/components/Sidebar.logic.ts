@@ -5,12 +5,17 @@ import {
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
 import type { ContextMenuItem } from "@t3tools/contracts";
-import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
+import type {
+  SidebarProjectSortOrder,
+  SidebarThreadSortOrder,
+  SidebarThreadVisibility,
+} from "@t3tools/contracts/settings";
 import type { AsyncResult } from "effect/unstable/reactivity";
 import {
   activeThreadAnchorTimestampMs,
   getThreadSortTimestamp,
   getThreadStatusRank,
+  isThreadActive,
   resolveSettledThreadTimestamp,
   sortThreads,
   toSortableTimestamp,
@@ -20,6 +25,18 @@ import {
 import type { SidebarThreadSummary, Thread } from "../types";
 import { cn } from "../lib/utils";
 import { isLatestTurnSettled } from "../session-logic";
+
+export const SIDEBAR_RECENT_THREAD_WINDOW_MS = 5 * 24 * 60 * 60 * 1000;
+
+export function isThreadVisibleForSidebarScope(
+  thread: ThreadSortInput,
+  visibility: SidebarThreadVisibility,
+  now = Date.now(),
+): boolean {
+  if (visibility === "all") return true;
+  if (visibility === "active") return isThreadActive(thread);
+  return getThreadSortTimestamp(thread, "updated_at") >= now - SIDEBAR_RECENT_THREAD_WINDOW_MS;
+}
 
 const THREAD_SELECTION_SAFE_SELECTOR = "[data-thread-item], [data-thread-selection-safe]";
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 200;

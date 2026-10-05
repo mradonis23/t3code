@@ -19,6 +19,7 @@ import {
   hasUnseenCompletion,
   isContextMenuPointerDown,
   isSidebarNestedLinkClick,
+  isThreadVisibleForSidebarScope,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   resolveProjectStatusIndicator,
@@ -872,6 +873,48 @@ describe("reduceSidebarProjectScopeMenuState", () => {
         { type: "query-changed", query: "beta" },
       ),
     ).toEqual({ open: true, query: "beta" });
+  });
+});
+
+describe("isThreadVisibleForSidebarScope", () => {
+  const now = Date.parse("2026-10-05T13:00:00.000Z");
+
+  it("keeps recent activity inside the five-day window", () => {
+    expect(
+      isThreadVisibleForSidebarScope(
+        {
+          createdAt: "2026-09-01T00:00:00.000Z",
+          updatedAt: "2026-10-03T12:00:00.000Z",
+        },
+        "recent",
+        now,
+      ),
+    ).toBe(true);
+    expect(
+      isThreadVisibleForSidebarScope(
+        {
+          createdAt: "2026-09-01T00:00:00.000Z",
+          updatedAt: "2026-09-25T12:00:00.000Z",
+        },
+        "recent",
+        now,
+      ),
+    ).toBe(false);
+  });
+
+  it("uses actionable runtime state for Active and never filters All", () => {
+    const idle = {
+      createdAt: "2026-09-01T00:00:00.000Z",
+      updatedAt: "2026-10-05T12:00:00.000Z",
+      session: { status: "idle" },
+    };
+    const running = {
+      ...idle,
+      session: { status: "running" },
+    };
+    expect(isThreadVisibleForSidebarScope(idle, "active", now)).toBe(false);
+    expect(isThreadVisibleForSidebarScope(running, "active", now)).toBe(true);
+    expect(isThreadVisibleForSidebarScope(idle, "all", now)).toBe(true);
   });
 });
 

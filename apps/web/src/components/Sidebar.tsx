@@ -146,6 +146,7 @@ import {
   formatWorkingDurationLabel,
   firstValidTimestampMs,
   hasUnseenCompletion,
+  isThreadVisibleForSidebarScope,
   isSidebarNestedLinkClick,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
@@ -1828,6 +1829,7 @@ export default function Sidebar() {
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
   const sidebarThreadSortOrder = useClientSettings((s) => s.sidebarThreadSortOrder);
+  const sidebarThreadVisibility = useClientSettings((s) => s.sidebarThreadVisibility);
   const updateClientSettings = useUpdateClientSettings();
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
@@ -2003,6 +2005,14 @@ export default function Sidebar() {
   const ungroupedHierarchyProjects = useMemo(
     () => projectGroups.filter((project) => project.hierarchy === null),
     [projectGroups],
+  );
+  const recentlyUsedThreads = useMemo(
+    () =>
+      sortThreadsForSidebar(
+        threads.filter((thread) => thread.archivedAt === null),
+        "updated_at",
+      ).slice(0, 6),
+    [threads],
   );
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
   // Threads on non-primary environments (T3 Connect, hosted) resolve their
@@ -2226,12 +2236,20 @@ export default function Sidebar() {
     // memo exactly at the next wake boundary.
     void snoozeWakeTick;
     const preciseNow = new Date().toISOString();
-    const visible = threads.filter(
-      (thread) =>
-        thread.archivedAt === null &&
-        (scopedProjectKeys === null ||
-          scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
-    );
+    const visible = threads.filter((thread) => {
+      if (thread.archivedAt !== null) return false;
+      if (
+        scopedProjectKeys !== null &&
+        !scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)
+      ) {
+        return false;
+      }
+      const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+      return (
+        threadKey === routeThreadKey ||
+        isThreadVisibleForSidebarScope(thread, sidebarThreadVisibility)
+      );
+    });
     const pinned: EnvironmentThreadShell[] = [];
     const active: EnvironmentThreadShell[] = [];
     const snoozed: EnvironmentThreadShell[] = [];
@@ -2284,9 +2302,11 @@ export default function Sidebar() {
     };
   }, [
     nowMinute,
+    routeThreadKey,
     scopedProjectKeys,
     serverConfigs,
     sidebarThreadSortOrder,
+    sidebarThreadVisibility,
     snoozeWakeTick,
     threads,
   ]);
@@ -3852,18 +3872,68 @@ export default function Sidebar() {
                         size="icon"
                         type="button"
                         className="relative shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
-                        aria-label={`Sort threads: ${sidebarThreadSortOrder === "alphabetical" ? "Alphabetical A-Z" : sidebarThreadSortOrder === "created_at" ? "Created at" : "Recent activity"}`}
+                        aria-label={`Organize threads: ${sidebarThreadVisibility === "active" ? "Active" : sidebarThreadVisibility === "all" ? "All" : "Recent"}, ${sidebarThreadSortOrder === "alphabetical" ? "Alphabetical A-Z" : sidebarThreadSortOrder === "status" ? "Status" : sidebarThreadSortOrder === "created_at" ? "Created at" : "Recent activity"}`}
                       />
                     }
                   >
                     <ClockIcon className="size-4" />
                   </PopoverTrigger>
-                  <PopoverPopup side="bottom" align="end" className="w-44" viewportClassName="p-1">
+                  <PopoverPopup side="bottom" align="end" className="w-52" viewportClassName="p-1">
+                    <div className="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                      View
+                    </div>
+                    {(
+                      [
+                        { value: "hierarchy", label: "T3 Smart" },
+                        { value: "codex", label: "Match Codex" },
+                      ] as const
+                    ).map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() =>
+                          updateClientSettings({ sidebarProjectGroupingMode: option.value })
+                        }
+                        className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/90 hover:bg-accent hover:text-foreground"
+                      >
+                        <span className="min-w-0 flex-1">{option.label}</span>
+                        {projectGroupingSettings.sidebarProjectGroupingMode === option.value ? (
+                          <CheckIcon aria-hidden className="size-3.5 shrink-0" />
+                        ) : null}
+                      </button>
+                    ))}
+                    <div className="mt-1 border-t border-border/60 px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                      Show
+                    </div>
+                    {(
+                      [
+                        { value: "active", label: "Active" },
+                        { value: "recent", label: "Recent" },
+                        { value: "all", label: "All" },
+                      ] as const
+                    ).map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() =>
+                          updateClientSettings({ sidebarThreadVisibility: option.value })
+                        }
+                        className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/90 hover:bg-accent hover:text-foreground"
+                      >
+                        <span className="min-w-0 flex-1">{option.label}</span>
+                        {sidebarThreadVisibility === option.value ? (
+                          <CheckIcon aria-hidden className="size-3.5 shrink-0" />
+                        ) : null}
+                      </button>
+                    ))}
+                    <div className="mt-1 border-t border-border/60 px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                      Sort
+                    </div>
                     {(
                       [
                         { value: "updated_at", label: "Recent activity" },
                         { value: "alphabetical", label: "Alphabetical A-Z" },
-                        { value: "created_at", label: "Created at" },
+                        { value: "status", label: "Status" },
                       ] as const
                     ).map((option) => (
                       <button
@@ -4115,6 +4185,49 @@ export default function Sidebar() {
                   // reorder-capable rows register as sortable (legacy-server
                   // pins render in place as plain rows).
                   const items: ReactNode[] = [
+                    ...(recentlyUsedThreads.length > 0
+                      ? [
+                          <li
+                            key="recently-used-header"
+                            className="mt-1 list-none px-2.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-sidebar-muted-foreground/70"
+                          >
+                            Recently Used
+                          </li>,
+                          ...recentlyUsedThreads.map((thread) => {
+                            const threadKey = scopedThreadKey(
+                              scopeThreadRef(thread.environmentId, thread.id),
+                            );
+                            return (
+                              <li key={`recently-used:${threadKey}`} className="list-none">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    navigateToThread(
+                                      scopeThreadRef(thread.environmentId, thread.id),
+                                    )
+                                  }
+                                  className={cn(
+                                    "flex h-7 w-full min-w-0 cursor-pointer items-center gap-2 rounded-md px-2.5 text-left text-xs text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
+                                    routeThreadKey === threadKey &&
+                                      "bg-sidebar-row-active text-sidebar-foreground",
+                                  )}
+                                  title={thread.title}
+                                >
+                                  <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+                                  <span className="shrink-0 tabular-nums text-[10px] text-sidebar-muted-foreground/60">
+                                    {threadTimeLabel(thread)}
+                                  </span>
+                                </button>
+                              </li>
+                            );
+                          }),
+                          <li
+                            key="recently-used-divider"
+                            aria-hidden
+                            className="mx-2.5 mb-1.5 mt-1 h-px list-none bg-sidebar-border/60"
+                          />,
+                        ]
+                      : []),
                     <SidebarDraftBlock
                       key="draft-sessions"
                       projectTitleByKey={projectTitleByKey}
