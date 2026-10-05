@@ -39,6 +39,7 @@ import { scopedProjectKey } from "../../lib/scopedEntities";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { useThreadSearch } from "../../state/queries";
+import { useStickyComposerModelSelection } from "../../state/use-composer-drafts";
 import { useThreadListV2Enabled } from "../threads/use-thread-list-v2-enabled";
 import { environmentServerConfigsAtom } from "../../state/server";
 import { AccountLimits, ResetCredits } from "../usage/UsageLimitsSection";
@@ -63,6 +64,7 @@ import {
   type ThreadListV2ListItem,
 } from "../threads/threadListV2";
 import { useThreadListV2ShelfPreferences } from "../threads/use-thread-list-v2-shelf-preferences";
+import { selectActiveHomeLimitEntry } from "./homeUsageLimits.logic";
 import type { HomeListFilterMenuEnvironment } from "./home-list-filter-menu";
 import {
   buildHomeListLayout,
@@ -1132,29 +1134,13 @@ export function HomeScreen(props: HomeScreenProps) {
       provider.driver === "codex" && provider.usageLimits ? [{ environmentId, provider }] : [],
     ),
   );
-  const activeLimitEntry =
-    [...props.threads]
-      .filter(
-        (thread) => thread.session?.status === "running" || thread.session?.status === "starting",
-      )
-      .sort(
-        (left, right) =>
-          Date.parse(right.session?.updatedAt ?? right.updatedAt ?? right.createdAt) -
-          Date.parse(left.session?.updatedAt ?? left.updatedAt ?? left.createdAt),
-      )
-      .flatMap((thread) => {
-        const instanceId =
-          thread.session?.providerInstanceId ?? thread.modelSelection.instanceId ?? null;
-        if (!instanceId) return [];
-        const entry = homeLimitEntries.find(
-          ({ environmentId, provider }) =>
-            environmentId === thread.environmentId && provider.instanceId === instanceId,
-        );
-        return entry ? [entry] : [];
-      })[0] ??
-    homeLimitEntries.find(({ provider }) => provider.instanceId === "codex") ??
-    homeLimitEntries[0] ??
-    null;
+  const stickyComposerModelSelection = useStickyComposerModelSelection();
+  const activeLimitEntry = selectActiveHomeLimitEntry({
+    entries: homeLimitEntries,
+    threads: props.threads,
+    selectedEnvironmentId: props.selectedEnvironmentId,
+    stickyProviderInstanceId: stickyComposerModelSelection?.instanceId ?? null,
+  });
   const visibleHomeLimitEntries = limitsExpanded
     ? homeLimitEntries
     : activeLimitEntry

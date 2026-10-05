@@ -85,6 +85,33 @@ describe("Codex account failover", () => {
     ).toBe(nena.instanceId);
   });
 
+  it("fails over from Mom to Nena when Dad is exhausted and Nena has usable capacity", () => {
+    const dad = provider({ id: "codex", sessionLeft: 100, weeklyLeft: 0, displayName: "Dad" });
+    const mom = provider({
+      id: "codex_mom",
+      sessionLeft: 0,
+      weeklyLeft: 53,
+      displayName: "Mom",
+    });
+    const nena = provider({
+      id: "codex_nena",
+      sessionLeft: 100,
+      weeklyLeft: 57,
+      displayName: "Nena",
+    });
+
+    expect(
+      selectCodexFailoverProvider({
+        providers: [dad, mom, nena],
+        currentInstanceId: mom.instanceId,
+        modelSelection: {
+          ...selection,
+          instanceId: mom.instanceId,
+        },
+      })?.instanceId,
+    ).toBe(nena.instanceId);
+  });
+
   it("skips a previously exhausted account and falls through to the next usable one", () => {
     const dad = provider({ id: "codex", sessionLeft: 0, weeklyLeft: 9 });
     const mom = provider({ id: "codex_mom", sessionLeft: 100, weeklyLeft: 53 });
