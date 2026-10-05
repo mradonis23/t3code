@@ -11,6 +11,19 @@ describe("mobile project grouping preferences", () => {
     expect(
       resolveMobileProjectGroupingSettings({ projectGroupingEnabled: false })
         .sidebarProjectGroupingMode,
+    ).toBe("hierarchy");
+    expect(
+      resolveMobileProjectGroupingSettings({
+        projectGroupingEnabled: false,
+        projectGroupingMode: "separate",
+      }).sidebarProjectGroupingMode,
+    ).toBe("hierarchy");
+    expect(
+      resolveMobileProjectGroupingSettings({
+        projectGroupingEnabled: false,
+        projectGroupingMode: "separate",
+        projectGroupingHierarchyMigrated: true,
+      }).sidebarProjectGroupingMode,
     ).toBe("separate");
     expect(
       resolveMobileProjectGroupingSettings({
@@ -24,10 +37,12 @@ describe("mobile project grouping preferences", () => {
     expect(mobileProjectGroupingModePatch("separate")).toEqual({
       projectGroupingMode: "separate",
       projectGroupingEnabled: false,
+      projectGroupingHierarchyMigrated: true,
     });
     expect(mobileProjectGroupingModePatch("repository_path")).toEqual({
       projectGroupingMode: "repository_path",
       projectGroupingEnabled: true,
+      projectGroupingHierarchyMigrated: true,
     });
   });
 });

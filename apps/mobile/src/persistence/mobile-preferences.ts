@@ -31,6 +31,8 @@ export interface Preferences {
   /** @deprecated Kept temporarily so older OTA bundles retain the selected mode. */
   readonly projectGroupingEnabled?: boolean;
   readonly projectGroupingMode?: SidebarProjectGroupingMode;
+  /** Marks that the new portfolio/repository/workspace grouping default has been presented. */
+  readonly projectGroupingHierarchyMigrated?: boolean;
   /**
    * Device-local mirror of the web `legacySidebarEnabled` setting. Mobile has
    * no client-settings sync, so the legacy grouped thread list is opted into
@@ -99,6 +101,7 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     collapsedProjectGroups?: readonly string[];
     projectGroupingEnabled?: boolean;
     projectGroupingMode?: SidebarProjectGroupingMode;
+    projectGroupingHierarchyMigrated?: boolean;
     legacyThreadListEnabled?: boolean;
     planModeEnabled?: boolean;
     threadListSettledShelfExpanded?: boolean;
@@ -164,6 +167,9 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     parsed.projectGroupingMode === "separate"
   ) {
     preferences.projectGroupingMode = parsed.projectGroupingMode;
+  }
+  if (typeof parsed.projectGroupingHierarchyMigrated === "boolean") {
+    preferences.projectGroupingHierarchyMigrated = parsed.projectGroupingHierarchyMigrated;
   }
   if (typeof parsed.legacyThreadListEnabled === "boolean") {
     preferences.legacyThreadListEnabled = parsed.legacyThreadListEnabled;

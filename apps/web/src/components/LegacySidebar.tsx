@@ -229,7 +229,7 @@ const SIDEBAR_LIST_ANIMATION_OPTIONS = {
 } as const;
 const EMPTY_THREAD_JUMP_LABELS = new Map<string, string>();
 const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
-  hierarchy: "Repository → workspace",
+  hierarchy: "Repository / workspace",
   repository: "Group by repository",
   repository_path: "Group by repository path",
   separate: "Keep separate",
@@ -273,7 +273,7 @@ function projectExpansionPreferenceKeys(project: SidebarProjectSnapshot): string
 function projectGroupingModeDescription(mode: SidebarProjectGroupingMode): string {
   switch (mode) {
     case "hierarchy":
-      return "Organize work as portfolio → repository → workspace → thread.";
+      return "Organize work as portfolio / repository / workspace / thread.";
     case "repository":
       return "Projects from the same repository share one sidebar row.";
     case "repository_path":

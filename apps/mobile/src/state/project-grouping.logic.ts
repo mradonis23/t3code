@@ -11,10 +11,15 @@ export const DEFAULT_MOBILE_PROJECT_GROUPING_SETTINGS: ProjectGroupingSettings =
 export function resolveMobileProjectGroupingSettings(
   preferences: Preferences,
 ): ProjectGroupingSettings {
+  const migrateLegacySeparate =
+    preferences.projectGroupingHierarchyMigrated !== true &&
+    (preferences.projectGroupingMode === "separate" ||
+      (preferences.projectGroupingMode === undefined &&
+        preferences.projectGroupingEnabled === false));
   return {
-    sidebarProjectGroupingMode:
-      preferences.projectGroupingMode ??
-      (preferences.projectGroupingEnabled === false ? "separate" : "hierarchy"),
+    sidebarProjectGroupingMode: migrateLegacySeparate
+      ? "hierarchy"
+      : (preferences.projectGroupingMode ?? "hierarchy"),
     sidebarProjectGroupingOverrides: {},
   };
 }
@@ -29,5 +34,6 @@ export function mobileProjectGroupingModePatch(
   return {
     projectGroupingMode: mode,
     projectGroupingEnabled: mode !== "separate",
+    projectGroupingHierarchyMigrated: true,
   };
 }

@@ -135,12 +135,12 @@ export function AccountLimits(props: {
           <Text className="text-base font-t3-medium text-foreground">{props.label}</Text>
           {props.instanceLabel !== props.label ? (
             <Text className="shrink text-xs text-foreground-tertiary" numberOfLines={1}>
-              · {props.instanceLabel}
+              | {props.instanceLabel}
             </Text>
           ) : null}
           {props.detail ? (
             <Text className="shrink text-sm text-foreground-muted" numberOfLines={1}>
-              · {props.detail}
+              | {props.detail}
             </Text>
           ) : null}
         </View>
@@ -197,7 +197,7 @@ export function ResetCredits(props: {
     credits.availableCount === 0
       ? "No reset credits banked"
       : `${credits.availableCount} ${credits.availableCount === 1 ? "reset credit" : "reset credits"} banked${
-          expiresIn ? ` · next expires in ${expiresIn}` : ""
+          expiresIn ? ` - next expires in ${expiresIn}` : ""
         }`;
 
   const redeem = async () => {
@@ -259,7 +259,7 @@ export function ResetCredits(props: {
             }
             style={colorOverride ? { color: colorOverride } : undefined}
           >
-            {busy ? "Using…" : "Use reset"}
+            {busy ? "Using..." : "Use reset"}
           </Text>
         </Pressable>
       ) : null}
