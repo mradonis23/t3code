@@ -122,8 +122,8 @@ describe("project hierarchy presentation", () => {
     ...repositoryIdentity,
     canonicalKey: "github.com/mradonis23/service_crm",
     owner: "mradonis23",
-    name: "service_crm",
-    displayName: "mradonis23/service_crm",
+    name: "CRM",
+    displayName: "CRM",
   };
   const lightingIdentity = {
     ...repositoryIdentity,

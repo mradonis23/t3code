@@ -103,8 +103,11 @@ function portfolioLabelForSegment(segment: string): string {
 function repositoryLabelForProject(
   project: Pick<EnvironmentProject, "title" | "repositoryIdentity">,
 ): string {
+  const canonicalSegments = project.repositoryIdentity?.canonicalKey?.trim().split("/") ?? [];
+  const canonicalName = canonicalSegments[canonicalSegments.length - 1]?.replace(/\.git$/i, "");
   const displaySegments = project.repositoryIdentity?.displayName?.trim().split(/[\\/]/) ?? [];
   const raw =
+    canonicalName ||
     project.repositoryIdentity?.name?.trim() ||
     displaySegments[displaySegments.length - 1] ||
     project.title;
