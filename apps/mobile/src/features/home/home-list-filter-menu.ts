@@ -1,7 +1,15 @@
-import type { EnvironmentId, SidebarThreadSortOrder } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  SidebarThreadSortOrder,
+  SidebarThreadVisibility,
+} from "@t3tools/contracts";
 
 import type { HomeProjectSortOrder } from "./homeThreadList";
-import { PROJECT_SORT_OPTIONS, THREAD_SORT_OPTIONS } from "./home-list-options";
+import {
+  PROJECT_SORT_OPTIONS,
+  THREAD_SORT_OPTIONS,
+  THREAD_VISIBILITY_OPTIONS,
+} from "./home-list-options";
 
 export interface HomeListFilterMenuEnvironment {
   readonly environmentId: EnvironmentId;
@@ -39,10 +47,12 @@ export function buildHomeListFilterMenu(props: {
   readonly selectedProjectKey: string | null;
   readonly projectSortOrder: HomeProjectSortOrder;
   readonly threadSortOrder: SidebarThreadSortOrder;
+  readonly threadVisibility: SidebarThreadVisibility;
   readonly onEnvironmentChange: (environmentId: EnvironmentId | null) => void;
   readonly onProjectChange: (projectKey: string | null) => void;
   readonly onProjectSortOrderChange: (sortOrder: HomeProjectSortOrder) => void;
   readonly onThreadSortOrderChange: (sortOrder: SidebarThreadSortOrder) => void;
+  readonly onThreadVisibilityChange: (visibility: SidebarThreadVisibility) => void;
   /** False hides the sort/group submenus. Thread List v2 uses a fixed
       creation-order layout, so offering those controls while it silently
       ignores them would be a lie; the environment filter still applies. */
@@ -97,6 +107,16 @@ export function buildHomeListFilterMenu(props: {
 
   if (props.listOrganization !== false) {
     items.push(
+      {
+        type: "submenu",
+        title: "Show",
+        items: THREAD_VISIBILITY_OPTIONS.map((option) => ({
+          type: "action",
+          title: option.label,
+          state: props.threadVisibility === option.value ? "on" : "off",
+          onPress: () => props.onThreadVisibilityChange(option.value),
+        })),
+      },
       {
         type: "submenu",
         title: "Sort projects",

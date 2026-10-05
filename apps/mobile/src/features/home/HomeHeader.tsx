@@ -2,6 +2,7 @@ import type {
   EnvironmentId,
   SidebarProjectGroupingMode,
   SidebarThreadSortOrder,
+  SidebarThreadVisibility,
 } from "@t3tools/contracts";
 import type { MenuAction } from "@react-native-menu/menu";
 import Constants from "expo-constants";
@@ -35,6 +36,7 @@ import {
   hasCustomHomeListOptions,
   PROJECT_SORT_OPTIONS,
   THREAD_SORT_OPTIONS,
+  THREAD_VISIBILITY_OPTIONS,
 } from "./home-list-options";
 
 export type HomeHeaderEnvironment = HomeListFilterMenuEnvironment;
@@ -48,11 +50,13 @@ export function HomeHeader(props: {
   readonly projectSortOrder: HomeProjectSortOrder;
   readonly projectGroupingMode: SidebarProjectGroupingMode;
   readonly threadSortOrder: SidebarThreadSortOrder;
+  readonly threadVisibility: SidebarThreadVisibility;
   readonly onSearchQueryChange: (query: string) => void;
   readonly onEnvironmentChange: (environmentId: EnvironmentId | null) => void;
   readonly onProjectChange: (projectKey: string | null) => void;
   readonly onProjectSortOrderChange: (sortOrder: HomeProjectSortOrder) => void;
   readonly onThreadSortOrderChange: (sortOrder: SidebarThreadSortOrder) => void;
+  readonly onThreadVisibilityChange: (visibility: SidebarThreadVisibility) => void;
   readonly onOpenEnvironments: () => void;
   readonly onOpenSettings: () => void;
   readonly onStartNewTask: () => void;
@@ -76,7 +80,10 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
   // Thread List v2 lays the list out in fixed creation order, so the
   // sort/group filter controls would be silently ignored — hide them and
   // key the "customized" icon state off the environment filter alone.
-  const threadListV2Enabled = useThreadListV2Enabled() && props.projectGroupingMode !== "hierarchy";
+  const threadListV2Enabled =
+    useThreadListV2Enabled() &&
+    props.projectGroupingMode !== "hierarchy" &&
+    props.projectGroupingMode !== "codex";
   const hasCustomListOptions = threadListV2Enabled
     ? props.selectedEnvironmentId !== null || props.selectedProjectKey !== null
     : hasCustomHomeListOptions(props);
@@ -122,6 +129,15 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
         ? []
         : ([
             {
+              id: "thread-visibility",
+              title: "Show",
+              subactions: THREAD_VISIBILITY_OPTIONS.map((option) => ({
+                id: `thread-visibility:${option.value}`,
+                title: option.label,
+                state: checkedMenuState(props.threadVisibility === option.value),
+              })),
+            },
+            {
               id: "project-sort",
               title: "Sort projects",
               subactions: PROJECT_SORT_OPTIONS.map((option) => ({
@@ -148,6 +164,7 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
       props.selectedEnvironmentId,
       props.selectedProjectKey,
       props.threadSortOrder,
+      props.threadVisibility,
       threadListV2Enabled,
     ],
   );
@@ -180,6 +197,14 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
         if (props.projects.some((project) => project.key === projectKey)) {
           props.onProjectChange(projectKey);
         }
+        return;
+      }
+
+      const threadVisibility = THREAD_VISIBILITY_OPTIONS.find(
+        (option) => id === `thread-visibility:${option.value}`,
+      );
+      if (threadVisibility) {
+        props.onThreadVisibilityChange(threadVisibility.value);
         return;
       }
 
@@ -220,16 +245,18 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
               onPress={props.onOpenEnvironments}
               brand={
                 <View className="flex-row items-center gap-2">
-                  {/* Mirrors the desktop SidebarBrand: T3 mark + muted "Code". */}
+                  {/* Mirrors the desktop SidebarBrand: T3 mark + muted "Unlimited". */}
                   <T3Wordmark colorClassName="accent-icon" height={15} />
                   <RNText className="-ml-0.5 text-[21px] font-t3-medium tracking-[-0.5px] text-foreground-muted">
-                    Code
+                    Unlimited
                   </RNText>
-                  <View className="rounded-full bg-subtle px-2 py-0.75">
-                    <RNText className="text-[11px] font-t3-bold tracking-[1.1px] text-foreground-muted uppercase">
-                      {stageLabel}
-                    </RNText>
-                  </View>
+                  {stageLabel ? (
+                    <View className="rounded-full bg-subtle px-2 py-0.75">
+                      <RNText className="text-[11px] font-t3-bold tracking-[1.1px] text-foreground-muted uppercase">
+                        {stageLabel}
+                      </RNText>
+                    </View>
+                  ) : null}
                 </View>
               }
             />
@@ -317,7 +344,10 @@ function IosHomeHeader(props: HomeHeaderProps) {
   // Thread List v2 lays the list out in fixed creation order, so the
   // sort/group filter controls would be silently ignored — hide them and
   // key the "customized" icon state off the environment filter alone.
-  const threadListV2Enabled = useThreadListV2Enabled() && props.projectGroupingMode !== "hierarchy";
+  const threadListV2Enabled =
+    useThreadListV2Enabled() &&
+    props.projectGroupingMode !== "hierarchy" &&
+    props.projectGroupingMode !== "codex";
   const hasCustomListOptions = threadListV2Enabled
     ? props.selectedEnvironmentId !== null || props.selectedProjectKey !== null
     : hasCustomHomeListOptions(props);
@@ -445,6 +475,21 @@ function IosHomeHeader(props: HomeHeaderProps) {
                 ))}
               </NativeHeaderToolbar.Menu>
             ) : null}
+
+            {threadListV2Enabled ? null : (
+              <NativeHeaderToolbar.Menu title="Show">
+                <NativeHeaderToolbar.Label>Show</NativeHeaderToolbar.Label>
+                {THREAD_VISIBILITY_OPTIONS.map((option) => (
+                  <NativeHeaderToolbar.MenuAction
+                    key={option.value}
+                    isOn={props.threadVisibility === option.value}
+                    onPress={() => props.onThreadVisibilityChange(option.value)}
+                  >
+                    <NativeHeaderToolbar.Label>{option.label}</NativeHeaderToolbar.Label>
+                  </NativeHeaderToolbar.MenuAction>
+                ))}
+              </NativeHeaderToolbar.Menu>
+            )}
 
             {threadListV2Enabled ? null : (
               <NativeHeaderToolbar.Menu title="Sort projects">

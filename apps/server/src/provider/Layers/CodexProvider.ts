@@ -54,6 +54,31 @@ type CodexRateLimitsProbe =
   | { readonly failure: string };
 
 const CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER = "2 seconds" as const;
+const CODEX_APP_SERVER_PROBE_SHUTDOWN_TIMEOUT = Duration.seconds(2);
+
+export const closeCodexAppServerProbe = Effect.fn("closeCodexAppServerProbe")(function* (
+  client: CodexClient.CodexAppServerClient["Service"],
+  child: ChildProcessSpawner.ChildProcessHandle,
+) {
+  yield* client.close.pipe(
+    Effect.timeoutOption(CODEX_APP_SERVER_PROBE_SHUTDOWN_TIMEOUT),
+    Effect.ignore,
+  );
+
+  const exited = yield* child.exitCode.pipe(
+    Effect.timeoutOption(CODEX_APP_SERVER_PROBE_SHUTDOWN_TIMEOUT),
+    Effect.match({
+      onFailure: () => false,
+      onSuccess: Option.isSome,
+    }),
+  );
+
+  if (exited) return;
+
+  yield* child
+    .kill({ killSignal: "SIGKILL" })
+    .pipe(Effect.timeoutOption(CODEX_APP_SERVER_PROBE_SHUTDOWN_TIMEOUT), Effect.ignore);
+});
 
 const CODEX_PRESENTATION = {
   displayName: "Codex",
@@ -394,6 +419,7 @@ export const withCodexAppServerClient = Effect.fn("withCodexAppServerClient")(fu
   const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
     Effect.provide(clientContext),
   );
+  yield* Effect.addFinalizer(() => closeCodexAppServerProbe(client, child));
   const initialize = yield* client.request("initialize", buildCodexInitializeParams());
   yield* client.notify("initialized", undefined);
   return { client, initialize };
@@ -596,8 +622,9 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     customModels: codexSettings.customModels,
     environment: resolvedEnvironment,
   }).pipe(
-    Effect.scoped,
+    // Keep the provider RPC deadline independent from bounded child cleanup.
     Effect.timeoutOption(Duration.millis(AUTH_PROBE_TIMEOUT_MS)),
+    Effect.scoped,
     Effect.result,
   );
 

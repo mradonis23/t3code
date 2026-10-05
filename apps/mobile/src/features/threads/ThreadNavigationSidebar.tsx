@@ -178,10 +178,17 @@ function ThreadNavigationSidebarPane(
     () => new Set(environments.map((environment) => environment.environmentId)),
     [environments],
   );
-  const { options, setSelectedEnvironmentId, setProjectSortOrder, setThreadSortOrder } =
-    useHomeListOptions(availableEnvironmentIds);
+  const {
+    options,
+    setSelectedEnvironmentId,
+    setProjectSortOrder,
+    setThreadSortOrder,
+    setThreadVisibility,
+  } = useHomeListOptions(availableEnvironmentIds);
   const threadListV2Enabled =
-    threadListV2PreferenceEnabled && options.projectGroupingMode !== "hierarchy";
+    threadListV2PreferenceEnabled &&
+    options.projectGroupingMode !== "hierarchy" &&
+    options.projectGroupingMode !== "codex";
   const searchEnvironmentIds = useMemo(
     () =>
       options.selectedEnvironmentId === null
@@ -320,6 +327,7 @@ function ThreadNavigationSidebarPane(
             matchedThreadKeys,
             projectSortOrder: options.projectSortOrder,
             threadSortOrder: options.threadSortOrder,
+            threadVisibility: options.threadVisibility,
             projectGroupingMode: options.projectGroupingMode,
           }),
     [
@@ -1103,10 +1111,12 @@ function ThreadNavigationSidebarPane(
         selectedProjectKey,
         projectSortOrder: options.projectSortOrder,
         threadSortOrder: options.threadSortOrder,
+        threadVisibility: options.threadVisibility,
         onEnvironmentChange: setSelectedEnvironmentId,
         onProjectChange: setSelectedProjectKey,
         onProjectSortOrderChange: setProjectSortOrder,
         onThreadSortOrderChange: setThreadSortOrder,
+        onThreadVisibilityChange: setThreadVisibility,
         listOrganization: !threadListV2Enabled,
       }),
     [
@@ -1117,6 +1127,7 @@ function ThreadNavigationSidebarPane(
       setProjectSortOrder,
       setSelectedEnvironmentId,
       setThreadSortOrder,
+      setThreadVisibility,
       threadListV2Enabled,
     ],
   );

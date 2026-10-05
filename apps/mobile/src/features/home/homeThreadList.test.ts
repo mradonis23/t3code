@@ -642,6 +642,60 @@ describe("buildHomeThreadGroups", () => {
     expect(group?.threads).toHaveLength(5);
   });
 
+  it("applies Recent as a real five-day visibility scope", () => {
+    const environmentId = EnvironmentId.make("environment-1");
+    const project = makeProject({
+      environmentId,
+      id: ProjectId.make("project-recent-scope"),
+      title: "Recent Scope",
+    });
+    const recent = makeThread({
+      environmentId,
+      id: ThreadId.make("recent-visible"),
+      projectId: project.id,
+      title: "Recent",
+      updatedAt: "2026-06-28T00:00:00.000Z",
+    });
+    const old = makeThread({
+      environmentId,
+      id: ThreadId.make("old-hidden"),
+      projectId: project.id,
+      title: "Old",
+      updatedAt: "2026-06-10T00:00:00.000Z",
+    });
+
+    const group = buildGroups([project], [old, recent], { threadVisibility: "recent" })[0];
+    expect(group?.threads.map((thread) => thread.id)).toEqual(["recent-visible"]);
+    expect(group?.recentThreads.map((thread) => thread.id)).toEqual(["recent-visible"]);
+  });
+
+  it("applies Active as a real actionable-work visibility scope", () => {
+    const environmentId = EnvironmentId.make("environment-1");
+    const project = makeProject({
+      environmentId,
+      id: ProjectId.make("project-active-scope"),
+      title: "Active Scope",
+    });
+    const active = makeThread({
+      environmentId,
+      id: ThreadId.make("active-visible"),
+      projectId: project.id,
+      title: "Needs approval",
+      updatedAt: "2026-06-28T00:00:00.000Z",
+      hasPendingApprovals: true,
+    });
+    const idle = makeThread({
+      environmentId,
+      id: ThreadId.make("idle-hidden"),
+      projectId: project.id,
+      title: "Idle",
+      updatedAt: "2026-06-28T12:00:00.000Z",
+    });
+
+    const group = buildGroups([project], [idle, active], { threadVisibility: "active" })[0];
+    expect(group?.threads.map((thread) => thread.id)).toEqual(["active-visible"]);
+  });
+
   it("does not apply the recency window while searching", () => {
     const environmentId = EnvironmentId.make("environment-1");
     const project = makeProject({

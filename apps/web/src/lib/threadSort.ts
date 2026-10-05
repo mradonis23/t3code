@@ -2,6 +2,8 @@ export {
   activeThreadAnchorTimestampMs,
   getLatestThreadForProject,
   getThreadSortTimestamp,
+  getThreadStatusRank,
+  isThreadActive,
   resolveSettledThreadTimestamp,
   sortThreads,
   toSortableTimestamp,

@@ -6,12 +6,51 @@ import * as Order from "effect/Order";
 export interface ThreadSortInput {
   readonly createdAt: string;
   readonly updatedAt: string;
-  readonly title?: string;
-  readonly latestUserMessageAt?: string | null;
-  readonly messages?: ReadonlyArray<{
-    readonly createdAt: string;
-    readonly role: string;
-  }>;
+  readonly title?: string | undefined;
+  readonly latestUserMessageAt?: string | null | undefined;
+  readonly session?: { readonly status?: string | undefined } | null | undefined;
+  readonly backgroundLiveness?: "working" | "monitoring" | null | undefined;
+  readonly hasPendingApprovals?: boolean | undefined;
+  readonly hasPendingUserInput?: boolean | undefined;
+  readonly hasActionableProposedPlan?: boolean | undefined;
+  readonly latestTurn?: { readonly state?: string | undefined } | null | undefined;
+  readonly messages?:
+    | ReadonlyArray<{
+        readonly createdAt: string;
+        readonly role: string;
+      }>
+    | undefined;
+}
+
+export function isThreadActive(thread: ThreadSortInput): boolean {
+  return (
+    thread.session?.status === "running" ||
+    thread.session?.status === "starting" ||
+    thread.backgroundLiveness === "working" ||
+    thread.backgroundLiveness === "monitoring" ||
+    thread.hasPendingApprovals === true ||
+    thread.hasPendingUserInput === true ||
+    thread.hasActionableProposedPlan === true
+  );
+}
+
+export function getThreadStatusRank(thread: ThreadSortInput): number {
+  if (thread.session?.status === "running") return 0;
+  if (thread.session?.status === "starting") return 1;
+  if (
+    thread.hasPendingApprovals === true ||
+    thread.hasPendingUserInput === true ||
+    thread.hasActionableProposedPlan === true
+  ) {
+    return 2;
+  }
+  if (thread.backgroundLiveness === "working" || thread.backgroundLiveness === "monitoring") {
+    return 3;
+  }
+  if (thread.session?.status === "error" || thread.latestTurn?.state === "error") return 4;
+  if (thread.session?.status === "ready") return 5;
+  if (thread.session?.status === "stopped") return 6;
+  return 7;
 }
 
 export function toSortableTimestamp(iso: string | undefined): number | null {
@@ -127,6 +166,16 @@ export function sortThreads<T extends { readonly id: string } & ThreadSortInput>
       (left, right) =>
         (left.title ?? "").localeCompare(right.title ?? "") || left.id.localeCompare(right.id),
     );
+  }
+  if (sortOrder === "status") {
+    return [...threads].sort((left, right) => {
+      const byStatus = getThreadStatusRank(left) - getThreadStatusRank(right);
+      if (byStatus !== 0) return byStatus;
+      const rightTimestamp = getThreadSortTimestamp(right, "updated_at");
+      const leftTimestamp = getThreadSortTimestamp(left, "updated_at");
+      if (rightTimestamp !== leftTimestamp) return rightTimestamp > leftTimestamp ? 1 : -1;
+      return right.id.localeCompare(left.id);
+    });
   }
   return Arr.sort(
     threads,

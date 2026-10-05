@@ -71,6 +71,7 @@ import {
   type SidebarProjectSortOrder,
   type SidebarThreadPreviewCount,
   type SidebarThreadSortOrder,
+  type SidebarThreadVisibility,
 } from "@t3tools/contracts/settings";
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
@@ -191,7 +192,7 @@ import {
   useThreadJumpHintVisibility,
   ThreadStatusPill,
 } from "./Sidebar.logic";
-import { sortThreads } from "../lib/threadSort";
+import { getThreadSortTimestamp, isThreadActive, sortThreads } from "../lib/threadSort";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useIsMobile } from "~/hooks/useMediaQuery";
@@ -216,20 +217,47 @@ const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Recent activity",
   created_at: "Created at",
   alphabetical: "Alphabetical A-Z",
+  status: "Status",
   manual: "Manual",
 };
 const SIDEBAR_THREAD_SORT_LABELS: Record<SidebarThreadSortOrder, string> = {
   updated_at: "Recent activity",
   created_at: "Created at",
   alphabetical: "Alphabetical A-Z",
+  status: "Status",
 };
+const SIDEBAR_THREAD_VISIBILITY_LABELS: Record<SidebarThreadVisibility, string> = {
+  active: "Active",
+  recent: "Recent",
+  all: "All",
+};
+const SIDEBAR_RECENT_THREAD_WINDOW_MS = 5 * 24 * 60 * 60 * 1000;
+
+function filterSidebarThreadsByVisibility(
+  threads: ReadonlyArray<SidebarThreadSummary>,
+  visibility: SidebarThreadVisibility,
+  activeThreadKey: string | null,
+  now = Date.now(),
+): SidebarThreadSummary[] {
+  const cutoff = now - SIDEBAR_RECENT_THREAD_WINDOW_MS;
+  return threads.filter((thread) => {
+    if (thread.archivedAt !== null) return false;
+    const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+    if (activeThreadKey !== null && threadKey === activeThreadKey) return true;
+    if (visibility === "all") return true;
+    if (visibility === "active") return isThreadActive(thread);
+    return getThreadSortTimestamp(thread, "updated_at") >= cutoff;
+  });
+}
+
 const SIDEBAR_LIST_ANIMATION_OPTIONS = {
   duration: 180,
   easing: "ease-out",
 } as const;
 const EMPTY_THREAD_JUMP_LABELS = new Map<string, string>();
 const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
-  hierarchy: "Repository / workspace",
+  hierarchy: "T3 Smart — Recommended",
+  codex: "Match Codex",
   repository: "Group by repository",
   repository_path: "Group by repository path",
   separate: "Keep separate",
@@ -274,6 +302,8 @@ function projectGroupingModeDescription(mode: SidebarProjectGroupingMode): strin
   switch (mode) {
     case "hierarchy":
       return "Organize work as portfolio / repository / workspace / thread.";
+    case "codex":
+      return "Use Codex workspace roots as a flatter project list.";
     case "repository":
       return "Projects from the same repository share one sidebar row.";
     case "repository_path":
@@ -1118,6 +1148,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const threadSortOrder = useClientSettings<SidebarThreadSortOrder>(
     (settings) => settings.sidebarThreadSortOrder,
   );
+  const threadVisibility = useClientSettings<SidebarThreadVisibility>(
+    (settings) => settings.sidebarThreadVisibility,
+  );
   const appSettingsConfirmThreadDelete = useClientSettings<boolean>(
     (settings) => settings.confirmThreadDelete,
   );
@@ -1279,7 +1312,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       });
     };
     const visibleProjectThreads = sortThreads(
-      projectThreads.filter((thread) => thread.archivedAt === null),
+      filterSidebarThreadsByVisibility(projectThreads, threadVisibility, activeRouteThreadKey),
       threadSortOrder,
     );
     const projectStatus = resolveProjectStatusIndicator(
@@ -1292,7 +1325,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       projectStatus,
       visibleProjectThreads,
     };
-  }, [projectThreads, threadLastVisitedAts, threadSortOrder]);
+  }, [
+    activeRouteThreadKey,
+    projectThreads,
+    threadLastVisitedAts,
+    threadSortOrder,
+    threadVisibility,
+  ]);
   const pinnedCollapsedThread = useMemo(() => {
     const activeThreadKey = activeRouteThreadKey ?? undefined;
     if (!activeThreadKey || projectExpanded) {
@@ -2506,6 +2545,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                   if (
                     value === "inherit" ||
                     value === "hierarchy" ||
+                    value === "codex" ||
                     value === "repository" ||
                     value === "repository_path" ||
                     value === "separate"
@@ -2527,6 +2567,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
                   </SelectItem>
                   <SelectItem hideIndicator value="hierarchy">
                     {PROJECT_GROUPING_MODE_LABELS.hierarchy}
+                  </SelectItem>
+                  <SelectItem hideIndicator value="codex">
+                    {PROJECT_GROUPING_MODE_LABELS.codex}
                   </SelectItem>
                   <SelectItem hideIndicator value="repository">
                     {PROJECT_GROUPING_MODE_LABELS.repository}
@@ -2649,16 +2692,20 @@ type SortableProjectHandleProps = Pick<
 function ProjectSortMenu({
   projectSortOrder,
   threadSortOrder,
+  threadVisibility,
   threadPreviewCount,
   onProjectSortOrderChange,
   onThreadSortOrderChange,
+  onThreadVisibilityChange,
   onThreadPreviewCountChange,
 }: {
   projectSortOrder: SidebarProjectSortOrder;
   threadSortOrder: SidebarThreadSortOrder;
+  threadVisibility: SidebarThreadVisibility;
   threadPreviewCount: SidebarThreadPreviewCount;
   onProjectSortOrderChange: (sortOrder: SidebarProjectSortOrder) => void;
   onThreadSortOrderChange: (sortOrder: SidebarThreadSortOrder) => void;
+  onThreadVisibilityChange: (visibility: SidebarThreadVisibility) => void;
   onThreadPreviewCountChange: (count: SidebarThreadPreviewCount) => void;
 }) {
   const handleThreadPreviewCountChange = useCallback(
@@ -2688,6 +2735,23 @@ function ProjectSortMenu({
         <TooltipPopup side="right">Sidebar options</TooltipPopup>
       </Tooltip>
       <MenuPopup align="end" side="bottom" className="min-w-52">
+        <MenuGroup>
+          <div className="px-2 py-1 sm:text-xs font-medium text-muted-foreground">Show</div>
+          <MenuRadioGroup
+            value={threadVisibility}
+            onValueChange={(value) => onThreadVisibilityChange(value as SidebarThreadVisibility)}
+          >
+            {(
+              Object.entries(SIDEBAR_THREAD_VISIBILITY_LABELS) as Array<
+                [SidebarThreadVisibility, string]
+              >
+            ).map(([value, label]) => (
+              <MenuRadioItem key={value} value={value} className="min-h-7 py-1 sm:text-xs">
+                {label}
+              </MenuRadioItem>
+            ))}
+          </MenuRadioGroup>
+        </MenuGroup>
         <MenuGroup>
           <div className="px-2 py-1 sm:text-xs font-medium text-muted-foreground">
             Sort projects
@@ -2813,6 +2877,7 @@ interface SidebarProjectsContentProps {
   handleDesktopUpdateButtonClick: () => void;
   projectSortOrder: SidebarProjectSortOrder;
   threadSortOrder: SidebarThreadSortOrder;
+  threadVisibility: SidebarThreadVisibility;
   threadPreviewCount: SidebarThreadPreviewCount;
   updateSettings: ReturnType<typeof useUpdateClientSettings>;
   openAddProject: () => void;
@@ -2826,6 +2891,8 @@ interface SidebarProjectsContentProps {
   archiveThread: ReturnType<typeof useThreadActions>["archiveThread"];
   deleteThread: ReturnType<typeof useThreadActions>["deleteThread"];
   sortedProjects: readonly SidebarProjectSnapshot[];
+  recentlyUsedThreads: readonly SidebarThreadSummary[];
+  navigateToThread: (threadRef: ScopedThreadRef) => void;
   expandedThreadListsByProject: ReadonlySet<string>;
   activeRouteProjectKey: string | null;
   routeThreadKey: string | null;
@@ -2855,6 +2922,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     handleDesktopUpdateButtonClick,
     projectSortOrder,
     threadSortOrder,
+    threadVisibility,
     threadPreviewCount,
     updateSettings,
     openAddProject,
@@ -2868,6 +2936,8 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     archiveThread,
     deleteThread,
     sortedProjects,
+    recentlyUsedThreads,
+    navigateToThread,
     expandedThreadListsByProject,
     activeRouteProjectKey,
     routeThreadKey,
@@ -2894,6 +2964,12 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
   const handleThreadSortOrderChange = useCallback(
     (sortOrder: SidebarThreadSortOrder) => {
       updateSettings({ sidebarThreadSortOrder: sortOrder });
+    },
+    [updateSettings],
+  );
+  const handleThreadVisibilityChange = useCallback(
+    (visibility: SidebarThreadVisibility) => {
+      updateSettings({ sidebarThreadVisibility: visibility });
     },
     [updateSettings],
   );
@@ -2991,6 +3067,36 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
         </SidebarGroup>
       ) : null}
       <LocalSecondaryStatus />
+      {recentlyUsedThreads.length > 0 ? (
+        <SidebarGroup className="px-2 pt-2 pb-0">
+          <div className="mb-1 px-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-sidebar-muted-foreground/70">
+            Recently Used
+          </div>
+          <SidebarMenu>
+            {recentlyUsedThreads.map((thread) => {
+              const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+              return (
+                <SidebarMenuItem key={"recent:" + threadKey}>
+                  <SidebarMenuButton
+                    className="h-7 gap-2 px-2 text-xs"
+                    isActive={routeThreadKey === threadKey}
+                    onClick={() =>
+                      navigateToThread(scopeThreadRef(thread.environmentId, thread.id))
+                    }
+                  >
+                    <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+                    <span className="shrink-0 text-[10px] text-sidebar-muted-foreground/70">
+                      {formatRelativeTimeLabel(
+                        thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt,
+                      )}
+                    </span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              );
+            })}
+          </SidebarMenu>
+        </SidebarGroup>
+      ) : null}
       <SidebarGroup className="px-2 py-2">
         <div className="mb-1 flex items-center justify-between pl-2 pr-1.5">
           <span className="text-xs font-medium text-sidebar-muted-foreground/80">Projects</span>
@@ -2998,9 +3104,11 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
             <ProjectSortMenu
               projectSortOrder={projectSortOrder}
               threadSortOrder={threadSortOrder}
+              threadVisibility={threadVisibility}
               threadPreviewCount={threadPreviewCount}
               onProjectSortOrderChange={handleProjectSortOrderChange}
               onThreadSortOrderChange={handleThreadSortOrderChange}
+              onThreadVisibilityChange={handleThreadVisibilityChange}
               onThreadPreviewCountChange={handleThreadPreviewCountChange}
             />
             <Tooltip>
@@ -3122,6 +3230,7 @@ export default function LegacySidebar() {
   const reorderProjects = useUiStateStore((store) => store.reorderProjects);
   const navigate = useNavigate();
   const sidebarThreadSortOrder = useClientSettings((s) => s.sidebarThreadSortOrder);
+  const sidebarThreadVisibility = useClientSettings((s) => s.sidebarThreadVisibility);
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const sidebarThreadPreviewCount = useClientSettings((s) => s.sidebarThreadPreviewCount);
@@ -3387,9 +3496,17 @@ export default function LegacySidebar() {
     animatedThreadListsRef.current.add(node);
   }, []);
 
-  const visibleThreads = useMemo(
-    () => sidebarThreads.filter((thread) => thread.archivedAt === null),
+  const recentlyUsedThreads = useMemo(
+    () =>
+      sortThreads(
+        sidebarThreads.filter((thread) => thread.archivedAt === null),
+        "updated_at",
+      ).slice(0, 6),
     [sidebarThreads],
+  );
+  const visibleThreads = useMemo(
+    () => filterSidebarThreadsByVisibility(sidebarThreads, sidebarThreadVisibility, routeThreadKey),
+    [routeThreadKey, sidebarThreadVisibility, sidebarThreads],
   );
   const sortedProjects = useMemo(() => {
     const sortableProjects = sidebarProjects.map((project) => ({
@@ -3427,8 +3544,10 @@ export default function LegacySidebar() {
     () =>
       sortedProjects.flatMap((project) => {
         const projectThreads = sortThreads(
-          (threadsByProjectKey.get(project.projectKey) ?? []).filter(
-            (thread) => thread.archivedAt === null,
+          filterSidebarThreadsByVisibility(
+            threadsByProjectKey.get(project.projectKey) ?? [],
+            sidebarThreadVisibility,
+            routeThreadKey,
           ),
           sidebarThreadSortOrder,
         );
@@ -3462,6 +3581,7 @@ export default function LegacySidebar() {
       }),
     [
       sidebarThreadSortOrder,
+      sidebarThreadVisibility,
       sidebarThreadPreviewCount,
       expandedThreadListsByProject,
       projectExpandedById,
@@ -3756,6 +3876,7 @@ export default function LegacySidebar() {
         handleDesktopUpdateButtonClick={handleDesktopUpdateButtonClick}
         projectSortOrder={sidebarProjectSortOrder}
         threadSortOrder={sidebarThreadSortOrder}
+        threadVisibility={sidebarThreadVisibility}
         threadPreviewCount={sidebarThreadPreviewCount}
         updateSettings={updateSettings}
         openAddProject={openAddProjectCommandPalette}
@@ -3769,6 +3890,8 @@ export default function LegacySidebar() {
         archiveThread={archiveThread}
         deleteThread={deleteThread}
         sortedProjects={sortedProjects}
+        recentlyUsedThreads={recentlyUsedThreads}
+        navigateToThread={navigateToThread}
         expandedThreadListsByProject={expandedThreadListsByProject}
         activeRouteProjectKey={activeRouteProjectKey}
         routeThreadKey={routeThreadKey}

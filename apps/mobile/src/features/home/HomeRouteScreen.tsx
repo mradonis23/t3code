@@ -80,6 +80,7 @@ export function HomeRouteScreen() {
     setSelectedEnvironmentId,
     setProjectSortOrder,
     setThreadSortOrder,
+    setThreadVisibility,
   } = useHomeListOptions(availableEnvironmentIds);
   const selectedEnvironmentId = listOptions.selectedEnvironmentId;
   const [selectedProjectKey, setSelectedProjectKey] = useState<string | null>(null);
@@ -165,6 +166,7 @@ export function HomeRouteScreen() {
           projectSortOrder={listOptions.projectSortOrder}
           projectGroupingMode={listOptions.projectGroupingMode}
           threadSortOrder={listOptions.threadSortOrder}
+          threadVisibility={listOptions.threadVisibility}
           onEnvironmentChange={setSelectedEnvironmentId}
           onProjectChange={setSelectedProjectKey}
           onOpenEnvironments={() =>
@@ -183,6 +185,7 @@ export function HomeRouteScreen() {
           onSearchQueryChange={setSearchQuery}
           onStartNewTask={() => navigation.navigate("NewTaskSheet", { screen: "NewTask" })}
           onThreadSortOrderChange={setThreadSortOrder}
+          onThreadVisibilityChange={setThreadVisibility}
         />
 
         <HomeScreen
@@ -239,6 +242,7 @@ export function HomeRouteScreen() {
           selectedProjectKey={selectedProjectKey}
           threads={threads}
           threadSortOrder={listOptions.threadSortOrder}
+          threadVisibility={listOptions.threadVisibility}
         />
       </>
     </AndroidHomeFabLayout>

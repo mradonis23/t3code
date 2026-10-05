@@ -82,6 +82,17 @@ function hierarchyPathSegments(workspaceRoot: string): string[] {
   return withoutDrive.split("/").filter(Boolean);
 }
 
+function hierarchyRepositoryFamilyPath(workspaceRoot: string): string {
+  const normalized = normalizeProjectPathForComparison(workspaceRoot).replaceAll("\\", "/");
+  const segments = normalized.split("/").filter(Boolean);
+  const worktreesIndex = segments.findIndex(
+    (segment) => segment.toLocaleLowerCase() === "worktrees",
+  );
+  const familySegments =
+    worktreesIndex >= 0 ? segments.slice(0, worktreesIndex) : segments.slice(0, -1);
+  return familySegments.join("/");
+}
+
 function portfolioSegmentForPath(workspaceRoot: string): string {
   const segments = hierarchyPathSegments(workspaceRoot);
   if (
@@ -112,6 +123,16 @@ function repositoryLabelForProject(
     displaySegments[displaySegments.length - 1] ||
     project.title;
   return humanizeHierarchyName(raw);
+}
+
+export function deriveCodexWorkspaceLabel(
+  project: Pick<EnvironmentProject, "title" | "workspaceRoot">,
+): string {
+  const segments = hierarchyPathSegments(project.workspaceRoot);
+  const rawWorkspace = segments[segments.length - 1]?.trim();
+  if (!rawWorkspace) return project.title;
+  const cleaned = rawWorkspace.replace(/^(?:codex|t3|mpr)-/i, "").replace(/-\d{8}(?:-\d+)?$/i, "");
+  return humanizeHierarchyName(cleaned || rawWorkspace);
 }
 
 function workspaceLabelForProject(project: Pick<EnvironmentProject, "workspaceRoot">): {
@@ -253,6 +274,9 @@ export function deriveLogicalProjectKey(
   if (groupingMode === "separate") {
     return derivePhysicalProjectKey(project);
   }
+  if (groupingMode === "codex") {
+    return ["codex", derivePhysicalProjectKey(project)].join("::");
+  }
   if (groupingMode === "hierarchy") {
     const hierarchy = deriveProjectHierarchyPresentation(project);
     return [
@@ -322,6 +346,7 @@ export interface ProjectGroup<TProject extends EnvironmentProject = EnvironmentP
   readonly key: string;
   readonly label: string;
   readonly representative: TProject;
+  readonly presentationProject: TProject;
   readonly members: ReadonlyArray<ProjectGroupMember<TProject>>;
   readonly memberProjectRefs: ReadonlyArray<ScopedProjectRef>;
 }
@@ -390,17 +415,51 @@ export function buildProjectGroups<TProject extends EnvironmentProject>(input: {
     }
   }
 
+  const repositoryIdentitiesByFamily = new Map<
+    string,
+    Map<string, NonNullable<TProject["repositoryIdentity"]>>
+  >();
+  for (const project of input.projects) {
+    const repositoryIdentity = project.repositoryIdentity;
+    if (repositoryIdentity == null) continue;
+    const familyKey = `${project.environmentId}::${hierarchyRepositoryFamilyPath(project.workspaceRoot)}`;
+    let identities = repositoryIdentitiesByFamily.get(familyKey);
+    if (!identities) {
+      identities = new Map();
+      repositoryIdentitiesByFamily.set(familyKey, identities);
+    }
+    identities.set(repositoryIdentity.canonicalKey, repositoryIdentity);
+  }
+
   const logicalKeyByPhysicalKey = new Map<string, string>();
+  const presentationProjectByPhysicalKey = new Map<string, TProject>();
   const groupedMembers = new Map<string, ProjectGroupMember<TProject>[]>();
   for (const [physicalProjectKey, physicalProjects] of projectsByPhysicalKey) {
     const winner = physicalProjects.reduce((current, candidate) =>
       shouldReplacePhysicalProjectWinner(current, candidate) ? candidate : current,
     );
     const identitySource = selectProjectIdentitySource(physicalProjects, winner);
-    const logicalKey = deriveLogicalProjectKey(identitySource, {
-      groupingMode: resolveProjectGroupingMode(winner, input.settings),
+    const groupingMode = resolveProjectGroupingMode(winner, input.settings);
+    const familyKey = `${winner.environmentId}::${hierarchyRepositoryFamilyPath(winner.workspaceRoot)}`;
+    const familyIdentities = repositoryIdentitiesByFamily.get(familyKey);
+    const inheritedRepositoryIdentity =
+      groupingMode === "hierarchy" &&
+      identitySource.repositoryIdentity === null &&
+      familyIdentities?.size === 1
+        ? familyIdentities.values().next().value
+        : undefined;
+    const presentationProject =
+      inheritedRepositoryIdentity === undefined
+        ? identitySource
+        : ({
+            ...identitySource,
+            repositoryIdentity: inheritedRepositoryIdentity,
+          } as TProject);
+    const logicalKey = deriveLogicalProjectKey(presentationProject, {
+      groupingMode,
     });
     logicalKeyByPhysicalKey.set(physicalProjectKey, logicalKey);
+    presentationProjectByPhysicalKey.set(physicalProjectKey, presentationProject);
     const member = { physicalProjectKey, project: winner };
     const existing = groupedMembers.get(logicalKey);
     if (existing) {
@@ -435,16 +494,23 @@ export function buildProjectGroups<TProject extends EnvironmentProject>(input: {
       (preferredEnvironmentId
         ? members.find((member) => member.project.environmentId === preferredEnvironmentId)?.project
         : null) ?? members[0]!.project;
+    const groupingMode = resolveProjectGroupingMode(representative, input.settings);
+    const presentationProject =
+      presentationProjectByPhysicalKey.get(derivePhysicalProjectKey(representative)) ??
+      representative;
     return {
       key,
       label:
-        members.length > 1
-          ? deriveProjectGroupLabel({
-              representative,
-              members: members.map((member) => member.project),
-            })
-          : representative.title,
+        groupingMode === "codex"
+          ? deriveCodexWorkspaceLabel(representative)
+          : members.length > 1
+            ? deriveProjectGroupLabel({
+                representative,
+                members: members.map((member) => member.project),
+              })
+            : representative.title,
       representative,
+      presentationProject,
       members,
       memberProjectRefs: projectRefsByLogicalKey.get(key) ?? [],
     };

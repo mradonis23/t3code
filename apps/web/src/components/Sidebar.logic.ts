@@ -10,6 +10,7 @@ import type { AsyncResult } from "effect/unstable/reactivity";
 import {
   activeThreadAnchorTimestampMs,
   getThreadSortTimestamp,
+  getThreadStatusRank,
   resolveSettledThreadTimestamp,
   sortThreads,
   toSortableTimestamp,
@@ -896,6 +897,27 @@ function sortProjectsByActivity<TProject extends SidebarProject>(
   }
   if (sortOrder === "alphabetical") {
     return [...projects].toSorted(compareTies);
+  }
+  if (sortOrder === "status") {
+    return [...projects].toSorted((left, right) => {
+      const leftThreads = getProjectThreads(left);
+      const rightThreads = getProjectThreads(right);
+      const leftStatus = leftThreads.reduce(
+        (rank, thread) => Math.min(rank, getThreadStatusRank(thread)),
+        Number.POSITIVE_INFINITY,
+      );
+      const rightStatus = rightThreads.reduce(
+        (rank, thread) => Math.min(rank, getThreadStatusRank(thread)),
+        Number.POSITIVE_INFINITY,
+      );
+      const byStatus = leftStatus - rightStatus;
+      if (byStatus !== 0) return byStatus;
+      const rightTimestamp = getProjectSortTimestamp(right, rightThreads, "updated_at");
+      const leftTimestamp = getProjectSortTimestamp(left, leftThreads, "updated_at");
+      const byTimestamp =
+        rightTimestamp === leftTimestamp ? 0 : rightTimestamp > leftTimestamp ? 1 : -1;
+      return byTimestamp || compareTies(left, right);
+    });
   }
 
   return [...projects].toSorted((left, right) => {

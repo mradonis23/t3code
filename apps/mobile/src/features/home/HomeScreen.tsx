@@ -11,12 +11,16 @@ import {
   threadSearchMatchKey,
   type EnvironmentThreadSearchMatch,
 } from "@t3tools/client-runtime/state/thread-search";
-import { sortPinnedThreadsByOrderKey } from "@t3tools/client-runtime/state/thread-sort";
+import {
+  sortPinnedThreadsByOrderKey,
+  sortThreads,
+} from "@t3tools/client-runtime/state/thread-sort";
 import {
   type EnvironmentId,
   resolveEnvironmentMachineKind,
   type SidebarProjectGroupingMode,
   type SidebarThreadSortOrder,
+  type SidebarThreadVisibility,
 } from "@t3tools/contracts";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import { AsyncResult } from "effect/unstable/reactivity";
@@ -75,6 +79,7 @@ import {
   buildHomeThreadGroups,
   sortHomeProjectScopes,
   type HomeProjectSortOrder,
+  type HomeThreadGroup,
 } from "./homeThreadList";
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "./thread-swipe-actions";
 
@@ -94,6 +99,7 @@ interface HomeScreenProps {
   readonly selectedProjectKey: string | null;
   readonly projectSortOrder: HomeProjectSortOrder;
   readonly threadSortOrder: SidebarThreadSortOrder;
+  readonly threadVisibility: SidebarThreadVisibility;
   readonly projectGroupingMode: SidebarProjectGroupingMode;
   readonly onSearchQueryChange: (query: string) => void;
   readonly onEnvironmentChange: (environmentId: EnvironmentId | null) => void;
@@ -212,7 +218,10 @@ export function HomeScreen(props: HomeScreenProps) {
     ReadonlyMap<string, HomeGroupDisplayState>
   >(() => new Map());
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
-  const threadListV2Enabled = useThreadListV2Enabled() && props.projectGroupingMode !== "hierarchy";
+  const threadListV2Enabled =
+    useThreadListV2Enabled() &&
+    props.projectGroupingMode !== "hierarchy" &&
+    props.projectGroupingMode !== "codex";
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
   const openSwipeableRef = useRef<SwipeableMethods | null>(null);
   const listRef = useRef<LegendListRef | null>(null);
@@ -390,6 +399,7 @@ export function HomeScreen(props: HomeScreenProps) {
             matchedThreadKeys,
             projectSortOrder: props.projectSortOrder,
             threadSortOrder: props.threadSortOrder,
+            threadVisibility: props.threadVisibility,
             projectGroupingMode: props.projectGroupingMode,
           }),
     [
@@ -399,6 +409,7 @@ export function HomeScreen(props: HomeScreenProps) {
       props.searchQuery,
       props.selectedEnvironmentId,
       props.threadSortOrder,
+      props.threadVisibility,
       matchedThreadKeys,
       scopedPendingTasks,
       scopedProjects,
@@ -407,16 +418,47 @@ export function HomeScreen(props: HomeScreenProps) {
   );
 
   const hasSearchQuery = props.searchQuery.trim().length > 0;
+  const recentlyUsedGroup = useMemo<HomeThreadGroup | null>(() => {
+    if (threadListV2Enabled || hasSearchQuery) return null;
+    const recentThreads = sortThreads(
+      scopedThreads.filter((thread) => thread.archivedAt === null),
+      "updated_at",
+    ).slice(0, 6);
+    const firstThread = recentThreads[0];
+    if (!firstThread) return null;
+    const representativeProject =
+      scopedProjects.find(
+        (project) =>
+          project.environmentId === firstThread.environmentId &&
+          project.id === firstThread.projectId,
+      ) ?? null;
+    if (!representativeProject) return null;
+    return {
+      key: "__recently-used",
+      title: "Recently Used",
+      representative: representativeProject,
+      projects: [representativeProject],
+      threads: recentThreads,
+      recentThreads,
+      pendingTasks: [],
+      newThreadTarget: null,
+      hierarchy: null,
+    };
+  }, [hasSearchQuery, scopedProjects, scopedThreads, threadListV2Enabled]);
+  const displayedProjectGroups = useMemo(
+    () => (recentlyUsedGroup ? [recentlyUsedGroup, ...projectGroups] : projectGroups),
+    [projectGroups, recentlyUsedGroup],
+  );
   const listLayout = useMemo(
     () =>
       threadListV2Enabled
         ? EMPTY_HOME_LIST_LAYOUT
         : buildHomeListLayout({
-            groups: projectGroups,
+            groups: displayedProjectGroups,
             displayStates: effectiveGroupDisplayStates,
             showAllThreads: hasSearchQuery,
           }),
-    [threadListV2Enabled, projectGroups, effectiveGroupDisplayStates, hasSearchQuery],
+    [threadListV2Enabled, displayedProjectGroups, effectiveGroupDisplayStates, hasSearchQuery],
   );
 
   const projectByKey = useMemo(() => {

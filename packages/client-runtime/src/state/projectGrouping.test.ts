@@ -1,4 +1,4 @@
-import { EnvironmentId, ProjectId } from "@t3tools/contracts";
+﻿import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import type { EnvironmentProject } from "./models.ts";
@@ -173,6 +173,34 @@ describe("project hierarchy presentation", () => {
     });
   });
 
+  it("inherits an unambiguous sibling repository identity for imported worktrees", () => {
+    const projects = [
+      makeProject("repo-main", String.raw`F:\CRM\service_crm`, {
+        title: "Service CRM",
+        repositoryIdentity: serviceCrmIdentity,
+      }),
+      makeProject(
+        "stripe-import",
+        String.raw`F:\CRM\worktrees\codex-stripe-setup-reliability-20260909`,
+        {
+          title: "Codex Stripe Setup Reliability 20260909",
+          repositoryIdentity: null,
+        },
+      ),
+    ];
+
+    const groups = buildProjectGroups({ projects, settings: settings("hierarchy") });
+    const stripe = groups.find((group) =>
+      String(group.representative.id).includes("stripe-import"),
+    );
+    expect(stripe).toBeDefined();
+    expect(deriveProjectHierarchyPresentation(stripe!.presentationProject)).toMatchObject({
+      portfolioLabel: "CRM",
+      repositoryLabel: "Service CRM",
+      workspaceLabel: "Stripe Setup Reliability",
+    });
+  });
+
   it("keeps hierarchy workspaces physically distinct", () => {
     const projects = [
       makeProject("main", String.raw`F:\CRM\service_crm`, {
@@ -208,6 +236,54 @@ describe("project hierarchy presentation", () => {
 });
 
 describe("buildProjectGroups", () => {
+  it("matches Codex-style workspaces from the authoritative workspace root", () => {
+    const projects = [
+      makeProject(
+        "codex-stripe",
+        String.raw`F:\CRM\worktrees\codex-stripe-setup-reliability-20260909`,
+        {
+          title: "Codex Stripe Setup Reliability 20260909",
+        },
+      ),
+      makeProject(
+        "codex-customer-link",
+        String.raw`F:\CRM\worktrees\codex-customer-link-recovery-20260910`,
+        {
+          title: "Customer Link Recovery 20260910",
+        },
+      ),
+    ];
+
+    const groups = buildProjectGroups({ projects, settings: settings("codex") });
+    expect(groups).toHaveLength(2);
+    expect(groups.map((group) => group.label)).toEqual([
+      "Stripe Setup Reliability",
+      "Customer Link Recovery",
+    ]);
+    expect(groups.every((group) => group.members.length === 1)).toBe(true);
+  });
+
+  it("dedupes duplicate registrations of the same Codex workspace without merging sibling workspaces", () => {
+    const stale = makeProject("stale", String.raw`F:\CRM\worktrees\codex-mms-transport-20261002`, {
+      updatedAt: "2026-10-02T00:00:00.000Z",
+    });
+    const fresh = makeProject("fresh", "F:/CRM/worktrees/codex-mms-transport-20261002/", {
+      updatedAt: "2026-10-03T00:00:00.000Z",
+    });
+    const sibling = makeProject(
+      "serviceops",
+      String.raw`F:\CRM\worktrees\codex-serviceops-unified-20261002`,
+    );
+
+    const groups = buildProjectGroups({
+      projects: [stale, fresh, sibling],
+      settings: settings("codex"),
+    });
+    expect(groups).toHaveLength(2);
+    expect(groups.map((group) => group.label)).toEqual(["MMS Transport", "ServiceOps Unified"]);
+    expect(groups[0]?.representative.id).toBe("fresh");
+  });
+
   it("preserves every physical clone as a selectable member in repository modes", () => {
     const projects = [
       makeProject("t3code", "/work/t3code"),

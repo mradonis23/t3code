@@ -2260,7 +2260,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
-  it.effect("dies when an active session conflicts with its persisted binding", () =>
+  it.effect("reports live session truth when persisted binding is stale", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;
       const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory;
@@ -2280,8 +2280,11 @@ routing.layer("ProviderServiceLive routing", (it) => {
         runtimeMode: "full-access",
       });
 
-      const exit = yield* Effect.exit(provider.listSessions());
-      assert.equal(Exit.hasDies(exit), true);
+      const sessions = yield* provider.listSessions();
+      const live = sessions.filter((session) => session.threadId === threadId);
+      assert.equal(live.length, 1);
+      assert.equal(live[0]?.provider, CODEX_DRIVER);
+      assert.equal(live[0]?.providerInstanceId, codexInstanceId);
       yield* directory.upsert({
         threadId,
         provider: ProviderDriverKind.make("codex"),
@@ -2291,7 +2294,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
-  it.effect("stops stale sessions in other providers after a successful replacement start", () =>
+  it.effect("stops the stale source before starting a replacement provider", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;
       const threadId = asThreadId("thread-provider-replacement");
@@ -2306,6 +2309,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
 
       routing.codex.stopSession.mockClear();
       routing.claude.stopSession.mockClear();
+      routing.claude.startSession.mockClear();
 
       const claudeSession = yield* provider.startSession(threadId, {
         provider: ProviderDriverKind.make("claudeAgent"),
@@ -2319,6 +2323,14 @@ routing.layer("ProviderServiceLive routing", (it) => {
       assert.equal(claudeSession.provider, "claudeAgent");
       assert.deepEqual(routing.codex.stopSession.mock.calls, [[threadId]]);
       assert.equal(routing.claude.stopSession.mock.calls.length, 0);
+      const sourceStopOrder = routing.codex.stopSession.mock.invocationCallOrder[0];
+      const targetStartOrder = routing.claude.startSession.mock.invocationCallOrder[0];
+      assert.equal(
+        sourceStopOrder !== undefined &&
+          targetStartOrder !== undefined &&
+          sourceStopOrder < targetStartOrder,
+        true,
+      );
 
       const sessions = yield* provider.listSessions();
       assert.deepEqual(

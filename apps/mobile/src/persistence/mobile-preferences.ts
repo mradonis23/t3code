@@ -5,7 +5,12 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import type { SidebarProjectGroupingMode } from "@t3tools/contracts";
+import type {
+  SidebarProjectGroupingMode,
+  SidebarProjectSortOrder,
+  SidebarThreadSortOrder,
+  SidebarThreadVisibility,
+} from "@t3tools/contracts";
 import { MOBILE_THEME_IDS, type MobileThemeId, type MobileThemeMode } from "../lib/mobileTheme";
 
 import * as MobileDatabase from "./mobile-database";
@@ -33,6 +38,9 @@ export interface Preferences {
   readonly projectGroupingMode?: SidebarProjectGroupingMode;
   /** Marks that the new portfolio/repository/workspace grouping default has been presented. */
   readonly projectGroupingHierarchyMigrated?: boolean;
+  readonly homeProjectSortOrder?: Exclude<SidebarProjectSortOrder, "manual">;
+  readonly homeThreadSortOrder?: SidebarThreadSortOrder;
+  readonly homeThreadVisibility?: SidebarThreadVisibility;
   /**
    * Device-local mirror of the web `legacySidebarEnabled` setting. Mobile has
    * no client-settings sync, so the legacy grouped thread list is opted into
@@ -102,6 +110,9 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     projectGroupingEnabled?: boolean;
     projectGroupingMode?: SidebarProjectGroupingMode;
     projectGroupingHierarchyMigrated?: boolean;
+    homeProjectSortOrder?: Exclude<SidebarProjectSortOrder, "manual">;
+    homeThreadSortOrder?: SidebarThreadSortOrder;
+    homeThreadVisibility?: SidebarThreadVisibility;
     legacyThreadListEnabled?: boolean;
     planModeEnabled?: boolean;
     threadListSettledShelfExpanded?: boolean;
@@ -170,6 +181,29 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   }
   if (typeof parsed.projectGroupingHierarchyMigrated === "boolean") {
     preferences.projectGroupingHierarchyMigrated = parsed.projectGroupingHierarchyMigrated;
+  }
+  if (
+    parsed.homeProjectSortOrder === "updated_at" ||
+    parsed.homeProjectSortOrder === "created_at" ||
+    parsed.homeProjectSortOrder === "alphabetical" ||
+    parsed.homeProjectSortOrder === "status"
+  ) {
+    preferences.homeProjectSortOrder = parsed.homeProjectSortOrder;
+  }
+  if (
+    parsed.homeThreadSortOrder === "updated_at" ||
+    parsed.homeThreadSortOrder === "created_at" ||
+    parsed.homeThreadSortOrder === "alphabetical" ||
+    parsed.homeThreadSortOrder === "status"
+  ) {
+    preferences.homeThreadSortOrder = parsed.homeThreadSortOrder;
+  }
+  if (
+    parsed.homeThreadVisibility === "active" ||
+    parsed.homeThreadVisibility === "recent" ||
+    parsed.homeThreadVisibility === "all"
+  ) {
+    preferences.homeThreadVisibility = parsed.homeThreadVisibility;
   }
   if (typeof parsed.legacyThreadListEnabled === "boolean") {
     preferences.legacyThreadListEnabled = parsed.legacyThreadListEnabled;

@@ -121,7 +121,8 @@ const ProjectIconPickerDialog = lazy(() =>
 );
 
 export const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
-  hierarchy: "Repository / workspace",
+  hierarchy: "T3 Smart — Recommended",
+  codex: "Match Codex",
   repository: "Group by repository",
   repository_path: "Group by repository path",
   separate: "Keep separate",
@@ -1265,6 +1266,9 @@ function ProjectDetail({
                   </SelectItem>
                   <SelectItem hideIndicator value="hierarchy">
                     {PROJECT_GROUPING_MODE_LABELS.hierarchy}
+                  </SelectItem>
+                  <SelectItem hideIndicator value="codex">
+                    {PROJECT_GROUPING_MODE_LABELS.codex}
                   </SelectItem>
                   <SelectItem hideIndicator value="repository">
                     {PROJECT_GROUPING_MODE_LABELS.repository}

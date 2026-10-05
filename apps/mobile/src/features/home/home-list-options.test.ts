@@ -1,6 +1,7 @@
 import {
   DEFAULT_SIDEBAR_PROJECT_SORT_ORDER,
   DEFAULT_SIDEBAR_THREAD_SORT_ORDER,
+  DEFAULT_SIDEBAR_THREAD_VISIBILITY,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -13,6 +14,7 @@ const defaults: HomeListOptions = {
       ? "updated_at"
       : DEFAULT_SIDEBAR_PROJECT_SORT_ORDER,
   threadSortOrder: DEFAULT_SIDEBAR_THREAD_SORT_ORDER,
+  threadVisibility: DEFAULT_SIDEBAR_THREAD_VISIBILITY,
 };
 
 describe("home list options", () => {

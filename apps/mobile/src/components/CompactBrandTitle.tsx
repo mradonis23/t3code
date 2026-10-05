@@ -30,7 +30,7 @@ export function CompactBrandTitle(
   return (
     <View
       aria-level={1}
-      accessibilityLabel="T3 Code, Threads"
+      accessibilityLabel="T3 Unlimited, Threads"
       accessible
       role="heading"
       className="flex-row items-center gap-1.5"
@@ -41,16 +41,18 @@ export function CompactBrandTitle(
         allowFontScaling={props.allowFontScaling}
         className="font-t3-medium text-[21px] tracking-[-0.5px] text-foreground-muted"
       >
-        Code
+        Unlimited
       </Text>
-      <View className="rounded-full bg-subtle px-1.5 py-0.5">
-        <Text
-          allowFontScaling={props.allowFontScaling}
-          className="font-t3-bold text-[9px] tracking-[0.9px] text-foreground-muted uppercase"
-        >
-          {stageLabel}
-        </Text>
-      </View>
+      {stageLabel ? (
+        <View className="rounded-full bg-subtle px-1.5 py-0.5">
+          <Text
+            allowFontScaling={props.allowFontScaling}
+            className="font-t3-bold text-[9px] tracking-[0.9px] text-foreground-muted uppercase"
+          >
+            {stageLabel}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }

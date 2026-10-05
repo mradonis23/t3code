@@ -2609,8 +2609,15 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       return;
     }
     session.stopped = true;
+    yield* session.runtime.close.pipe(
+      Effect.mapError((cause) => mapCodexRuntimeError(session.threadId, "session/close", cause)),
+      Effect.onError(() =>
+        Effect.sync(() => {
+          session.stopped = false;
+        }),
+      ),
+    );
     sessions.delete(session.threadId);
-    yield* session.runtime.close.pipe(Effect.ignore);
     yield* Effect.ignore(Scope.close(session.scope, Exit.void));
     yield* Fiber.interrupt(session.eventFiber).pipe(Effect.ignore);
   });

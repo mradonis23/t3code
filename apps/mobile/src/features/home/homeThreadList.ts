@@ -10,16 +10,20 @@ import type {
 } from "@t3tools/client-runtime/state/shell";
 import {
   getThreadSortTimestamp,
+  getThreadStatusRank,
+  isThreadActive,
   sortThreads,
   toSortableTimestamp,
 } from "@t3tools/client-runtime/state/thread-sort";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
+
 import type {
   EnvironmentId,
   ScopedProjectRef,
   SidebarProjectGroupingMode,
   SidebarProjectSortOrder,
   SidebarThreadSortOrder,
+  SidebarThreadVisibility,
 } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
@@ -77,7 +81,7 @@ export function buildHomeProjectScopes(input: {
   }).map((group) => {
     const hierarchy =
       input.projectGroupingMode === "hierarchy"
-        ? deriveProjectHierarchyPresentation(group.representative)
+        ? deriveProjectHierarchyPresentation(group.presentationProject)
         : null;
     return {
       key: group.key,
@@ -194,6 +198,13 @@ interface MutableHomeThreadGroup {
   readonly threads: EnvironmentThreadShell[];
 }
 
+function groupStatusRank(group: HomeThreadGroup): number {
+  return group.threads.reduce(
+    (best, thread) => Math.min(best, getThreadStatusRank(thread)),
+    Number.POSITIVE_INFINITY,
+  );
+}
+
 function groupSortTimestamp(group: HomeThreadGroup, sortOrder: HomeProjectSortOrder): number {
   const latestThread = group.threads.reduce(
     (latest, thread) => Math.max(latest, getThreadSortTimestamp(thread, sortOrder)),
@@ -223,6 +234,17 @@ function selectRecentThreads(
   return recent.length > 0 ? recent : sortedThreads.slice(0, RECENT_THREAD_FALLBACK_COUNT);
 }
 
+function filterThreadsByVisibility(
+  sortedThreads: ReadonlyArray<EnvironmentThreadShell>,
+  visibility: SidebarThreadVisibility,
+  now: number,
+): ReadonlyArray<EnvironmentThreadShell> {
+  if (visibility === "all") return sortedThreads;
+  if (visibility === "active") return sortedThreads.filter(isThreadActive);
+  const cutoff = now - RECENT_THREAD_WINDOW_MS;
+  return sortedThreads.filter((thread) => getThreadSortTimestamp(thread, "updated_at") >= cutoff);
+}
+
 export function buildHomeThreadGroups(input: {
   readonly projects: ReadonlyArray<EnvironmentProject>;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
@@ -232,11 +254,13 @@ export function buildHomeThreadGroups(input: {
   readonly matchedThreadKeys?: ReadonlySet<string>;
   readonly projectSortOrder: HomeProjectSortOrder;
   readonly threadSortOrder: SidebarThreadSortOrder;
+  readonly threadVisibility?: SidebarThreadVisibility;
   readonly projectGroupingMode: SidebarProjectGroupingMode;
   /** Current time used for the recency window; defaults to now. Injectable for tests. */
   readonly now?: number;
 }): ReadonlyArray<HomeThreadGroup> {
   const now = input.now ?? Date.now();
+  const threadVisibility = input.threadVisibility ?? "all";
   const groups = new Map<string, MutableHomeThreadGroup>();
   const groupTitleByKey = new Map<string, string>();
   const groupHierarchyByKey = new Map<string, HomeProjectScope["hierarchy"]>();
@@ -352,13 +376,20 @@ export function buildHomeThreadGroups(input: {
       continue;
     }
 
-    const sortedThreads = sortThreads(matchingThreads, input.threadSortOrder);
-    // An active search should reach the full history, so the recency window
-    // only trims the default (no-query) view.
-    const recentThreads =
+    const allSortedThreads = sortThreads(matchingThreads, input.threadSortOrder);
+    // Search always reaches full history. Outside search, Active / Recent / All
+    // is a real scope filter rather than a cosmetic preference.
+    const sortedThreads =
       query.length === 0
-        ? selectRecentThreads(sortedThreads, input.threadSortOrder, now)
-        : sortedThreads;
+        ? filterThreadsByVisibility(allSortedThreads, threadVisibility, now)
+        : allSortedThreads;
+    if (sortedThreads.length === 0 && matchingPendingTasks.length === 0) {
+      continue;
+    }
+    const recentThreads =
+      query.length !== 0 || threadVisibility !== "all"
+        ? sortedThreads
+        : selectRecentThreads(sortedThreads, input.threadSortOrder, now);
 
     // A stale project id still resolves to the canonical member with the same
     // environment/path, so quick creation follows the machine with the newest activity.
@@ -416,6 +447,10 @@ export function buildHomeThreadGroups(input: {
 
       if (input.projectSortOrder === "alphabetical") {
         return compareText(left.title, right.title) || compareText(left.key, right.key);
+      }
+      if (input.projectSortOrder === "status") {
+        const byStatus = groupStatusRank(left) - groupStatusRank(right);
+        if (byStatus !== 0) return byStatus;
       }
       const rightTimestamp = groupSortTimestamp(right, input.projectSortOrder);
       const leftTimestamp = groupSortTimestamp(left, input.projectSortOrder);

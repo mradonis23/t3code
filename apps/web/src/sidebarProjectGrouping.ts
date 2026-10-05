@@ -172,7 +172,9 @@ export function buildSidebarProjectSnapshots(input: {
       remoteMembers.every((member) => isDesktopLocal(member.environmentId));
     const groupingMode = resolveProjectGroupingMode(representative, input.settings);
     const hierarchy =
-      groupingMode === "hierarchy" ? deriveProjectHierarchyPresentation(representative) : null;
+      groupingMode === "hierarchy"
+        ? deriveProjectHierarchyPresentation(group.presentationProject)
+        : null;
 
     return {
       ...representative,

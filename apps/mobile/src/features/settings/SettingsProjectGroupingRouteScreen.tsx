@@ -23,8 +23,15 @@ const GROUPING_OPTIONS: ReadonlyArray<{
 }> = [
   {
     mode: "hierarchy",
-    label: "Repository / workspace",
-    description: "Group work as portfolio / repository / workspace / thread.",
+    label: "T3 Smart — Recommended",
+    description:
+      "Organize by system, repository, workspace, and thread with recent work surfaced first.",
+  },
+  {
+    mode: "codex",
+    label: "Match Codex",
+    description:
+      "Use the same workspace roots Codex sessions use, presented as a flatter project list.",
   },
   {
     mode: "repository",

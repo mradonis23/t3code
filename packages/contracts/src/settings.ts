@@ -46,17 +46,28 @@ export const SidebarProjectSortOrder = Schema.Literals([
   "updated_at",
   "created_at",
   "alphabetical",
+  "status",
   "manual",
 ]);
 export type SidebarProjectSortOrder = typeof SidebarProjectSortOrder.Type;
 export const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = "updated_at";
 
-export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at", "alphabetical"]);
+export const SidebarThreadSortOrder = Schema.Literals([
+  "updated_at",
+  "created_at",
+  "alphabetical",
+  "status",
+]);
 export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
 export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
 
+export const SidebarThreadVisibility = Schema.Literals(["active", "recent", "all"]);
+export type SidebarThreadVisibility = typeof SidebarThreadVisibility.Type;
+export const DEFAULT_SIDEBAR_THREAD_VISIBILITY: SidebarThreadVisibility = "recent";
+
 export const SidebarProjectGroupingMode = Schema.Literals([
   "hierarchy",
+  "codex",
   "repository",
   "repository_path",
   "separate",
@@ -366,6 +377,9 @@ export const ClientSettingsSchema = Schema.Struct({
   ),
   sidebarThreadSortOrder: SidebarThreadSortOrder.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_THREAD_SORT_ORDER)),
+  ),
+  sidebarThreadVisibility: SidebarThreadVisibility.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_THREAD_VISIBILITY)),
   ),
   sidebarThreadPreviewCount: SidebarThreadPreviewCount.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_SIDEBAR_THREAD_PREVIEW_COUNT)),
@@ -1291,6 +1305,7 @@ export const ClientSettingsPatch = Schema.Struct({
   ),
   sidebarProjectSortOrder: Schema.optionalKey(SidebarProjectSortOrder),
   sidebarThreadSortOrder: Schema.optionalKey(SidebarThreadSortOrder),
+  sidebarThreadVisibility: Schema.optionalKey(SidebarThreadVisibility),
   sidebarThreadPreviewCount: Schema.optionalKey(SidebarThreadPreviewCount),
   timestampFormat: Schema.optionalKey(TimestampFormat),
   wordWrap: Schema.optionalKey(Schema.Boolean),

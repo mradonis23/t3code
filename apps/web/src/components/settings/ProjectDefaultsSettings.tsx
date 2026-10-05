@@ -438,6 +438,7 @@ export function ProjectDefaultsSettings({
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
                 <SelectItem value="hierarchy">{PROJECT_GROUPING_MODE_LABELS.hierarchy}</SelectItem>
+                <SelectItem value="codex">{PROJECT_GROUPING_MODE_LABELS.codex}</SelectItem>
                 <SelectItem value="repository">
                   {PROJECT_GROUPING_MODE_LABELS.repository}
                 </SelectItem>

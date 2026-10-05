@@ -643,6 +643,47 @@ describe("ProviderRuntimeIngestion", () => {
     ]);
   });
 
+  it("ignores a delayed source exit after target ownership commits", async () => {
+    const harness = await createHarness();
+    const threadId = asThreadId("thread-1");
+    const sourceInstanceId = ProviderInstanceId.make("codex-source");
+    const targetInstanceId = ProviderInstanceId.make("codex-target");
+    const committedAt = "2026-01-01T00:00:02.000Z";
+
+    await harness.dispatch({
+      type: "thread.session.set",
+      commandId: CommandId.make("cmd-target-session-committed"),
+      threadId,
+      session: {
+        threadId,
+        status: "ready",
+        providerName: "codex",
+        providerInstanceId: targetInstanceId,
+        runtimeMode: "approval-required",
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: committedAt,
+      },
+      createdAt: committedAt,
+    });
+
+    await harness.emitAndDrain([
+      {
+        type: "session.exited",
+        eventId: asEventId("evt-delayed-source-exit"),
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: sourceInstanceId,
+        threadId,
+        createdAt: "2026-01-01T00:00:03.000Z",
+      },
+    ]);
+
+    const thread = (await harness.readModel()).threads.find((entry) => entry.id === threadId);
+    expect(thread?.session?.status).toBe("ready");
+    expect(thread?.session?.providerInstanceId).toBe(targetInstanceId);
+    expect(thread?.session?.updatedAt).toBe(committedAt);
+  });
+
   it.each(["turn.completed", "turn.aborted"] as const)(
     "finalizes old buffered text on late %s without stopping the newer turn",
     async (terminalType) => {
