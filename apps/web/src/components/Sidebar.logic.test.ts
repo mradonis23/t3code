@@ -926,6 +926,36 @@ describe("sortThreadsForSidebar", () => {
 
     expect(sorted.map((thread) => thread.id)).toEqual(["newest", "stale-stamp"]);
   });
+
+  it("sorts alphabetically by title when requested", () => {
+    const sorted = sortThreadsForSidebar(
+      [
+        { id: "z", title: "Zulu", createdAt: "2026-03-09T12:00:00.000Z" },
+        { id: "a", title: "Alpha", createdAt: "2026-03-09T08:00:00.000Z" },
+        { id: "m", title: "Mike", createdAt: "2026-03-09T10:00:00.000Z" },
+      ],
+      "alphabetical",
+    );
+
+    expect(sorted.map((thread) => thread.title)).toEqual(["Alpha", "Mike", "Zulu"]);
+  });
+
+  it("sorts strictly by creation time when Created at is selected", () => {
+    const sorted = sortThreadsForSidebar(
+      [
+        {
+          id: "older-but-unsettled",
+          title: "Older",
+          createdAt: "2026-03-09T08:00:00.000Z",
+          unsettledAt: "2026-03-09T15:00:00.000Z",
+        },
+        { id: "newer", title: "Newer", createdAt: "2026-03-09T12:00:00.000Z" },
+      ],
+      "created_at",
+    );
+
+    expect(sorted.map((thread) => thread.id)).toEqual(["newer", "older-but-unsettled"]);
+  });
 });
 
 describe("pinOrderKeyBetween", () => {

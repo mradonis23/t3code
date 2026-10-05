@@ -615,10 +615,23 @@ function firstValidTimestamp(
 export function sortThreadsForSidebar<
   T extends {
     readonly id: string;
+    readonly title?: string;
     readonly createdAt: string;
     readonly unsettledAt?: string | null | undefined;
   },
->(threads: readonly T[]): T[] {
+>(threads: readonly T[], sortOrder: SidebarThreadSortOrder = "updated_at"): T[] {
+  if (sortOrder === "alphabetical") {
+    return [...threads].toSorted(
+      (left, right) =>
+        (left.title ?? "").localeCompare(right.title ?? "") || left.id.localeCompare(right.id),
+    );
+  }
+  if (sortOrder === "created_at") {
+    return [...threads].toSorted(
+      (left, right) =>
+        Date.parse(right.createdAt) - Date.parse(left.createdAt) || left.id.localeCompare(right.id),
+    );
+  }
   return [...threads].toSorted(
     (left, right) =>
       activeThreadAnchorTimestampMs(right) - activeThreadAnchorTimestampMs(left) ||

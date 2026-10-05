@@ -99,6 +99,7 @@ import { readLocalApi } from "../localApi";
 import { getProjectOrderKey, selectProjectGroupingSettings } from "../logicalProject";
 import {
   buildSidebarProjectSnapshots,
+  groupSidebarProjectsByHierarchy,
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
@@ -110,7 +111,7 @@ import { useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
-import { useClientSettings } from "../hooks/useSettings";
+import { useClientSettings, useUpdateClientSettings } from "../hooks/useSettings";
 import { useCopyToClipboard } from "../hooks/useCopyToClipboard";
 import { useLocalStorage } from "../hooks/useLocalStorage";
 import { useNowMinute } from "../hooks/useNowMinute";
@@ -1826,6 +1827,9 @@ export default function Sidebar() {
   const confirmThreadDelete = useClientSettings((s) => s.confirmThreadDelete);
   const confirmThreadArchive = useClientSettings((s) => s.confirmThreadArchive);
   const sidebarProjectSortOrder = useClientSettings((s) => s.sidebarProjectSortOrder);
+  const sidebarThreadSortOrder = useClientSettings((s) => s.sidebarThreadSortOrder);
+  const updateClientSettings = useUpdateClientSettings();
+  const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const timestampFormat = useClientSettings((s) => s.timestampFormat);
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const {
@@ -1992,6 +1996,14 @@ export default function Sidebar() {
   );
   const projectGroupsRef = useRef(projectGroups);
   projectGroupsRef.current = projectGroups;
+  const hierarchyProjectGroups = useMemo(
+    () => groupSidebarProjectsByHierarchy(projectGroups),
+    [projectGroups],
+  );
+  const ungroupedHierarchyProjects = useMemo(
+    () => projectGroups.filter((project) => project.hierarchy === null),
+    [projectGroups],
+  );
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
   // Threads on non-primary environments (T3 Connect, hosted) resolve their
   // provider entry from their own environment's config: default instance ids
@@ -2260,7 +2272,7 @@ export default function Sidebar() {
           )
           .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))),
       ),
-      activeThreads: sortThreadsForSidebar(active),
+      activeThreads: sortThreadsForSidebar(active, sidebarThreadSortOrder),
       // Soonest wake first: "what comes back next" is the shelf's question.
       snoozedThreads: snoozed.toSorted(
         (left, right) =>
@@ -2270,7 +2282,14 @@ export default function Sidebar() {
       settledThreads: sortSettledThreadsForSidebar(settled),
       snoozeNow: preciseNow,
     };
-  }, [nowMinute, scopedProjectKeys, serverConfigs, snoozeWakeTick, threads]);
+  }, [
+    nowMinute,
+    scopedProjectKeys,
+    serverConfigs,
+    sidebarThreadSortOrder,
+    snoozeWakeTick,
+    threads,
+  ]);
 
   const threadSearchInputRef = useRef<HTMLInputElement>(null);
   const [threadSearchQuery, setThreadSearchQuery] = useState("");
@@ -3826,6 +3845,47 @@ export default function Sidebar() {
                     </ComboboxList>
                   </ComboboxPopup>
                 </Combobox>
+                <Popover open={sortMenuOpen} onOpenChange={setSortMenuOpen}>
+                  <PopoverTrigger
+                    render={
+                      <SidebarMenuButton
+                        size="icon"
+                        type="button"
+                        className="relative shrink-0 focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
+                        aria-label={`Sort threads: ${sidebarThreadSortOrder === "alphabetical" ? "Alphabetical A-Z" : sidebarThreadSortOrder === "created_at" ? "Created at" : "Recent activity"}`}
+                      />
+                    }
+                  >
+                    <ClockIcon className="size-4" />
+                  </PopoverTrigger>
+                  <PopoverPopup side="bottom" align="end" className="w-44" viewportClassName="p-1">
+                    {(
+                      [
+                        { value: "updated_at", label: "Recent activity" },
+                        { value: "alphabetical", label: "Alphabetical A-Z" },
+                        { value: "created_at", label: "Created at" },
+                      ] as const
+                    ).map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => {
+                          updateClientSettings({
+                            sidebarProjectSortOrder: option.value,
+                            sidebarThreadSortOrder: option.value,
+                          });
+                          setSortMenuOpen(false);
+                        }}
+                        className="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-foreground/90 hover:bg-accent hover:text-foreground"
+                      >
+                        <span className="min-w-0 flex-1">{option.label}</span>
+                        {sidebarThreadSortOrder === option.value ? (
+                          <CheckIcon aria-hidden className="size-3.5 shrink-0" />
+                        ) : null}
+                      </button>
+                    ))}
+                  </PopoverPopup>
+                </Popover>
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -3935,6 +3995,7 @@ export default function Sidebar() {
                     thread: EnvironmentThreadShell,
                     section: "pinned" | "active" | "snoozed" | "settled",
                     sortable?: SortablePinnedRowBag,
+                    hideProjectLabel = false,
                   ) => {
                     const threadKey = scopedThreadKey(
                       scopeThreadRef(thread.environmentId, thread.id),
@@ -4017,9 +4078,11 @@ export default function Sidebar() {
                           null
                         }
                         projectDisplayName={
-                          projectDisplayNameByKey.get(
-                            `${thread.environmentId}:${thread.projectId}`,
-                          ) ?? null
+                          hideProjectLabel
+                            ? null
+                            : (projectDisplayNameByKey.get(
+                                `${thread.environmentId}:${thread.projectId}`,
+                              ) ?? null)
                         }
                         providerEntryByInstanceId={
                           providerEntriesByEnvironment.get(thread.environmentId) ??
@@ -4113,8 +4176,141 @@ export default function Sidebar() {
                       />,
                     );
                   }
-                  for (const thread of activeThreads) {
-                    items.push(renderThreadRow(thread, "active"));
+                  const useActiveThreadHierarchy =
+                    projectGroupingSettings.sidebarProjectGroupingMode === "hierarchy" &&
+                    scopedProjectGroup === null &&
+                    hierarchyProjectGroups.length > 0;
+                  if (useActiveThreadHierarchy) {
+                    const activeThreadsByProjectGroupKey = new Map<
+                      string,
+                      EnvironmentThreadShell[]
+                    >();
+                    const projectGroupKeyByMember = new Map<string, string>();
+                    for (const projectGroup of projectGroups) {
+                      for (const projectRef of projectGroup.memberProjectRefs) {
+                        projectGroupKeyByMember.set(
+                          `${projectRef.environmentId}:${projectRef.projectId}`,
+                          projectGroup.projectKey,
+                        );
+                      }
+                    }
+                    for (const thread of activeThreads) {
+                      const projectGroupKey = projectGroupKeyByMember.get(
+                        `${thread.environmentId}:${thread.projectId}`,
+                      );
+                      if (!projectGroupKey) continue;
+                      const existing = activeThreadsByProjectGroupKey.get(projectGroupKey);
+                      if (existing) existing.push(thread);
+                      else activeThreadsByProjectGroupKey.set(projectGroupKey, [thread]);
+                    }
+
+                    for (const portfolio of hierarchyProjectGroups) {
+                      const portfolioThreadCount = portfolio.repositories.reduce(
+                        (portfolioTotal, repository) =>
+                          portfolioTotal +
+                          repository.projects.reduce(
+                            (repositoryTotal, project) =>
+                              repositoryTotal +
+                              (activeThreadsByProjectGroupKey.get(project.projectKey)?.length ?? 0),
+                            0,
+                          ),
+                        0,
+                      );
+                      if (portfolioThreadCount === 0) continue;
+                      items.push(
+                        <li
+                          key={`hierarchy-portfolio:${portfolio.key}`}
+                          className="mt-3 list-none px-2.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-sidebar-muted-foreground/70"
+                        >
+                          {portfolio.label}
+                        </li>,
+                      );
+                      for (const repository of portfolio.repositories) {
+                        const repositoryThreadCount = repository.projects.reduce(
+                          (total, project) =>
+                            total +
+                            (activeThreadsByProjectGroupKey.get(project.projectKey)?.length ?? 0),
+                          0,
+                        );
+                        if (repositoryThreadCount === 0) continue;
+                        items.push(
+                          <li
+                            key={`hierarchy-repository:${repository.key}`}
+                            className="list-none px-2.5 pb-1 pt-0.5"
+                          >
+                            <div className="flex min-w-0 items-center gap-1.5 text-xs font-semibold text-sidebar-foreground/85">
+                              <FolderIcon
+                                aria-hidden
+                                className="size-3.5 shrink-0 text-icon-muted"
+                              />
+                              <span className="min-w-0 flex-1 truncate">{repository.label}</span>
+                            </div>
+                          </li>,
+                        );
+                        for (const project of repository.projects) {
+                          const workspaceThreads =
+                            activeThreadsByProjectGroupKey.get(project.projectKey) ?? [];
+                          if (workspaceThreads.length === 0) continue;
+                          items.push(
+                            <li
+                              key={`hierarchy-workspace:${project.projectKey}`}
+                              className="list-none border-l border-sidebar-border/60 py-0.5 pl-3 pr-2.5"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => setProjectScopeKey(project.projectKey)}
+                                className="flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-sm py-1 text-left text-xs font-medium text-sidebar-muted-foreground hover:text-sidebar-foreground"
+                                title={`Show only ${project.displayName}`}
+                              >
+                                <span className="min-w-0 flex-1 truncate">
+                                  {project.displayName}
+                                </span>
+                                <span className="shrink-0 tabular-nums text-[10px] text-sidebar-muted-foreground/60">
+                                  {workspaceThreads.length}
+                                </span>
+                              </button>
+                            </li>,
+                          );
+                          for (const thread of workspaceThreads) {
+                            items.push(renderThreadRow(thread, "active", undefined, true));
+                          }
+                        }
+                      }
+                    }
+
+                    const ungroupedWithThreads = ungroupedHierarchyProjects.filter(
+                      (project) =>
+                        (activeThreadsByProjectGroupKey.get(project.projectKey)?.length ?? 0) > 0,
+                    );
+                    if (ungroupedWithThreads.length > 0) {
+                      items.push(
+                        <li
+                          key="hierarchy-other"
+                          className="mt-3 list-none px-2.5 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-sidebar-muted-foreground/70"
+                        >
+                          Other
+                        </li>,
+                      );
+                      for (const project of ungroupedWithThreads) {
+                        const workspaceThreads =
+                          activeThreadsByProjectGroupKey.get(project.projectKey) ?? [];
+                        items.push(
+                          <li
+                            key={`hierarchy-other-workspace:${project.projectKey}`}
+                            className="list-none px-2.5 py-1 text-xs font-medium text-sidebar-muted-foreground"
+                          >
+                            {project.displayName}
+                          </li>,
+                        );
+                        for (const thread of workspaceThreads) {
+                          items.push(renderThreadRow(thread, "active", undefined, true));
+                        }
+                      }
+                    }
+                  } else {
+                    for (const thread of activeThreads) {
+                      items.push(renderThreadRow(thread, "active"));
+                    }
                   }
                   // Snoozed shelf: between the inbox and Settled — out of the
                   // way, never gone. The header always renders while anything
