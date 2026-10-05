@@ -137,15 +137,18 @@ describe("background activity settings restore", () => {
 });
 
 describe("project grouping toggle", () => {
-  it("enables repository grouping and disables into separate projects", () => {
+  it("enables hierarchy grouping by default and disables into separate projects", () => {
+    expect(isProjectGroupingEnabled("hierarchy")).toBe(true);
     expect(isProjectGroupingEnabled("repository")).toBe(true);
     expect(isProjectGroupingEnabled("repository_path")).toBe(true);
     expect(isProjectGroupingEnabled("separate")).toBe(false);
-    expect(projectGroupingModeFromToggle(true)).toBe("repository");
+    expect(projectGroupingModeFromToggle(true)).toBe("hierarchy");
     expect(projectGroupingModeFromToggle(false)).toBe("separate");
   });
 
-  it("restores repository path grouping when the toggle is cycled", () => {
+  it("restores the last enabled grouping mode when the toggle is cycled", () => {
+    expect(projectGroupingModeFromToggle(false, "hierarchy")).toBe("separate");
+    expect(projectGroupingModeFromToggle(true, "hierarchy")).toBe("hierarchy");
     expect(projectGroupingModeFromToggle(false, "repository_path")).toBe("separate");
     expect(projectGroupingModeFromToggle(true, "repository_path")).toBe("repository_path");
   });
