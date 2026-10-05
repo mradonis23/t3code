@@ -77,7 +77,7 @@ function humanizeHierarchyName(value: string): string {
 }
 
 function hierarchyPathSegments(workspaceRoot: string): string[] {
-  const normalized = workspaceRoot.replaceAll("\\", "/").replace(/^\/+/, "");
+  const normalized = workspaceRoot.replace(/\\/g, "/").replace(/^\/+/, "");
   const withoutDrive = normalized.replace(/^[A-Za-z]:\/+/, "");
   return withoutDrive.split("/").filter(Boolean);
 }
@@ -103,9 +103,10 @@ function portfolioLabelForSegment(segment: string): string {
 function repositoryLabelForProject(
   project: Pick<EnvironmentProject, "title" | "repositoryIdentity">,
 ): string {
+  const displaySegments = project.repositoryIdentity?.displayName?.trim().split(/[\\/]/) ?? [];
   const raw =
     project.repositoryIdentity?.name?.trim() ||
-    project.repositoryIdentity?.displayName?.trim().split(/[\\/]/).at(-1) ||
+    displaySegments[displaySegments.length - 1] ||
     project.title;
   return humanizeHierarchyName(raw);
 }
@@ -122,7 +123,7 @@ function workspaceLabelForProject(project: Pick<EnvironmentProject, "workspaceRo
     return { label: "Main", isMain: true };
   }
 
-  const rawWorkspace = segments[worktreesIndex + 1] ?? segments.at(-1) ?? "Workspace";
+  const rawWorkspace = segments[worktreesIndex + 1] ?? segments[segments.length - 1] ?? "Workspace";
   const cleaned = rawWorkspace.replace(/^(?:codex|t3|mpr)-/i, "").replace(/-\d{8}(?:-\d+)?$/i, "");
   return {
     label: humanizeHierarchyName(cleaned || rawWorkspace),

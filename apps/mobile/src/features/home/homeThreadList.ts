@@ -30,6 +30,10 @@ import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 
 export type HomeProjectSortOrder = Exclude<SidebarProjectSortOrder, "manual">;
 
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 export interface HomeProjectScope {
   readonly key: string;
   readonly title: string;
@@ -94,7 +98,7 @@ export function sortHomeProjectScopes(input: {
 }): ReadonlyArray<HomeProjectScope> {
   if (input.projectSortOrder === "alphabetical") {
     return [...input.scopes].sort(
-      (left, right) => left.title.localeCompare(right.title) || left.key.localeCompare(right.key),
+      (left, right) => compareText(left.title, right.title) || compareText(left.key, right.key),
     );
   }
   const scopeKeyByProjectRef = new Map(
@@ -396,11 +400,13 @@ export function buildHomeThreadGroups(input: {
       const leftHierarchy = left.hierarchy;
       const rightHierarchy = right.hierarchy;
       if (leftHierarchy && rightHierarchy) {
-        const byPortfolio = leftHierarchy.portfolioLabel.localeCompare(
+        const byPortfolio = compareText(
+          leftHierarchy.portfolioLabel,
           rightHierarchy.portfolioLabel,
         );
         if (byPortfolio !== 0) return byPortfolio;
-        const byRepository = leftHierarchy.repositoryLabel.localeCompare(
+        const byRepository = compareText(
+          leftHierarchy.repositoryLabel,
           rightHierarchy.repositoryLabel,
         );
         if (byRepository !== 0) return byRepository;
@@ -409,18 +415,18 @@ export function buildHomeThreadGroups(input: {
       }
 
       if (input.projectSortOrder === "alphabetical") {
-        return left.title.localeCompare(right.title) || left.key.localeCompare(right.key);
+        return compareText(left.title, right.title) || compareText(left.key, right.key);
       }
       const rightTimestamp = groupSortTimestamp(right, input.projectSortOrder);
       const leftTimestamp = groupSortTimestamp(left, input.projectSortOrder);
       if (rightTimestamp !== leftTimestamp) return rightTimestamp > leftTimestamp ? 1 : -1;
-      return left.title.localeCompare(right.title) || left.key.localeCompare(right.key);
+      return compareText(left.title, right.title) || compareText(left.key, right.key);
     });
   }
 
   if (input.projectSortOrder === "alphabetical") {
     return [...result].sort(
-      (left, right) => left.title.localeCompare(right.title) || left.key.localeCompare(right.key),
+      (left, right) => compareText(left.title, right.title) || compareText(left.key, right.key),
     );
   }
 
