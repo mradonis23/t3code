@@ -142,7 +142,7 @@ describe("project hierarchy presentation", () => {
     expect(deriveProjectHierarchyPresentation(project)).toEqual({
       portfolioKey: "crm",
       portfolioLabel: "CRM",
-      repositoryKey: "github.com/mradonis23/service_crm",
+      repositoryKey: "crm:service crm",
       repositoryLabel: "Service CRM",
       workspaceLabel: "ServiceOps Unified",
       isMainWorkspace: false,
@@ -183,6 +183,27 @@ describe("project hierarchy presentation", () => {
       }),
     ];
     expect(buildProjectGroups({ projects, settings: settings("hierarchy") })).toHaveLength(2);
+  });
+
+  it("collapses duplicate physical registrations of the same hierarchy workspace", () => {
+    const projects = [
+      makeProject("umbrella-main", String.raw`F:\CRM`, {
+        title: "Service CRM",
+        repositoryIdentity: null,
+      }),
+      makeProject("repo-main", String.raw`F:\CRM\service_crm`, {
+        title: "CRM",
+        repositoryIdentity: serviceCrmIdentity,
+      }),
+      makeProject("mms", String.raw`F:\CRM\worktrees\codex-mms-transport-20261002`, {
+        repositoryIdentity: serviceCrmIdentity,
+      }),
+    ];
+
+    const groups = buildProjectGroups({ projects, settings: settings("hierarchy") });
+    expect(groups).toHaveLength(2);
+    expect(groups.find((group) => group.key.endsWith("::main"))?.memberProjectRefs).toHaveLength(2);
+    expect(groups.some((group) => group.key.endsWith("::mms transport"))).toBe(true);
   });
 });
 

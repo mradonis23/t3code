@@ -146,9 +146,7 @@ export function deriveProjectHierarchyPresentation(
   const portfolioLabel = portfolioLabelForSegment(portfolioSegment);
   const repositoryLabel = repositoryLabelForProject(project);
   const workspace = workspaceLabelForProject(project);
-  const repositoryKey =
-    project.repositoryIdentity?.canonicalKey?.trim() ||
-    `${portfolioLabel.toLocaleLowerCase()}:${repositoryLabel.toLocaleLowerCase()}`;
+  const repositoryKey = `${portfolioLabel.toLocaleLowerCase()}:${repositoryLabel.toLocaleLowerCase()}`;
 
   return {
     portfolioKey: portfolioLabel.toLocaleLowerCase(),
@@ -245,15 +243,24 @@ function deriveRepositoryScopedKey(
 export function deriveLogicalProjectKey(
   project: Pick<
     EnvironmentProject,
-    "environmentId" | "id" | "workspaceRoot" | "repositoryIdentity"
+    "environmentId" | "id" | "title" | "workspaceRoot" | "repositoryIdentity"
   >,
   options?: {
     readonly groupingMode?: SidebarProjectGroupingMode;
   },
 ): string {
   const groupingMode = options?.groupingMode ?? "hierarchy";
-  if (groupingMode === "separate" || groupingMode === "hierarchy") {
+  if (groupingMode === "separate") {
     return derivePhysicalProjectKey(project);
+  }
+  if (groupingMode === "hierarchy") {
+    const hierarchy = deriveProjectHierarchyPresentation(project);
+    return [
+      "hierarchy",
+      hierarchy.portfolioKey,
+      hierarchy.repositoryKey,
+      hierarchy.workspaceLabel.toLocaleLowerCase(),
+    ].join("::");
   }
 
   return (
@@ -266,7 +273,7 @@ export function deriveLogicalProjectKey(
 export function deriveLogicalProjectKeyFromSettings(
   project: Pick<
     EnvironmentProject,
-    "environmentId" | "id" | "workspaceRoot" | "repositoryIdentity"
+    "environmentId" | "id" | "title" | "workspaceRoot" | "repositoryIdentity"
   >,
   settings: ProjectGroupingSettings,
 ): string {
