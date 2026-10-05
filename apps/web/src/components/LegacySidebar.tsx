@@ -2908,19 +2908,11 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     () => groupSidebarProjectsByHierarchy(sortedProjects),
     [sortedProjects],
   );
-  const hierarchyProjectCount = hierarchyGroups.reduce(
-    (total, portfolio) =>
-      total +
-      portfolio.repositories.reduce(
-        (repositoryTotal, repository) => repositoryTotal + repository.projects.length,
-        0,
-      ),
-    0,
+  const ungroupedHierarchyProjects = useMemo(
+    () => sortedProjects.filter((project) => project.hierarchy === null),
+    [sortedProjects],
   );
-  const showHierarchy =
-    !isManualProjectSorting &&
-    sortedProjects.length > 0 &&
-    hierarchyProjectCount === sortedProjects.length;
+  const showHierarchy = !isManualProjectSorting && hierarchyGroups.length > 0;
 
   const renderProjectRow = (project: SidebarProjectSnapshot) => (
     <SidebarProjectListRow
@@ -3097,6 +3089,16 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                 ))}
               </section>
             ))}
+            {ungroupedHierarchyProjects.length > 0 ? (
+              <section aria-label="Other projects" className="grid gap-1">
+                <div className="px-2 pt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-sidebar-muted-foreground/70">
+                  Other
+                </div>
+                <SidebarMenu>
+                  {ungroupedHierarchyProjects.map((project) => renderProjectRow(project))}
+                </SidebarMenu>
+              </section>
+            ) : null}
           </div>
         ) : (
           <SidebarMenu ref={attachProjectListAutoAnimateRef}>
