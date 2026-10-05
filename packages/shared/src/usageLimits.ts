@@ -232,7 +232,9 @@ export function collectLimitAccounts(
         {
           key: `${environmentId}:${provider.instanceId}`,
           driver: provider.driver,
-          displayName: provider.displayName?.trim() || null,
+          displayName:
+            provider.displayName?.trim() ||
+            (provider.driver === "codex" && provider.instanceId === "codex" ? "Dad" : null),
           enabled: provider.enabled,
           email: provider.auth.email,
           plan: provider.auth.label,

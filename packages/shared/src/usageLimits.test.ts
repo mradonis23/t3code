@@ -318,7 +318,7 @@ describe("collectLimitSources", () => {
 describe("pools", () => {
   it("keeps main Codex, Mom, and Nena telemetry and enabled states distinct", () => {
     const providers = [
-      provider({ instanceId: ProviderInstanceId.make("codex"), displayName: "Codex" }),
+      provider({ instanceId: ProviderInstanceId.make("codex") }),
       provider({ instanceId: ProviderInstanceId.make("mom"), displayName: "Mom", enabled: false }),
       provider({
         instanceId: ProviderInstanceId.make("nena"),
@@ -351,7 +351,7 @@ describe("pools", () => {
         used: account.limits.windows[0]?.usedPercent,
       })),
     ).toEqual([
-      { name: "Codex", enabled: true, used: 0 },
+      { name: "Dad", enabled: true, used: 0 },
       { name: "Mom", enabled: false, used: 20 },
       { name: "Nena", enabled: true, used: 40 },
     ]);
