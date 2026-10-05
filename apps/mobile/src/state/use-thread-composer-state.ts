@@ -49,6 +49,7 @@ import {
   removeComposerDraftAttachment,
   scheduleUnusedComposerAttachmentCleanup,
   setComposerDraftText,
+  setStickyComposerModelSelection,
   updateComposerDraftSettings,
   useComposerDraft,
 } from "./use-composer-drafts";
@@ -592,6 +593,7 @@ export function useThreadComposerState() {
           ? { interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE }
           : {}),
       });
+      setStickyComposerModelSelection(value);
     },
     [selectedEnvironmentRuntime?.serverConfig, selectedThreadKey],
   );
