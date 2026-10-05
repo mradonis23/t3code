@@ -216,6 +216,7 @@ function HomeTopContentSpacer() {
 
 export function HomeScreen(props: HomeScreenProps) {
   const [limitsExpanded, setLimitsExpanded] = useState(false);
+  const stickyComposerModelSelection = useStickyComposerModelSelection();
   const [groupDisplayStates, setGroupDisplayStates] = useState<
     ReadonlyMap<string, HomeGroupDisplayState>
   >(() => new Map());
@@ -1134,7 +1135,6 @@ export function HomeScreen(props: HomeScreenProps) {
       provider.driver === "codex" && provider.usageLimits ? [{ environmentId, provider }] : [],
     ),
   );
-  const stickyComposerModelSelection = useStickyComposerModelSelection();
   const activeLimitEntry = selectActiveHomeLimitEntry({
     entries: homeLimitEntries,
     threads: props.threads,
