@@ -93,7 +93,7 @@ export function sortHomeProjectScopes(input: {
   readonly projectSortOrder: HomeProjectSortOrder;
 }): ReadonlyArray<HomeProjectScope> {
   if (input.projectSortOrder === "alphabetical") {
-    return [...input.scopes].toSorted(
+    return [...input.scopes].sort(
       (left, right) => left.title.localeCompare(right.title) || left.key.localeCompare(right.key),
     );
   }
@@ -392,7 +392,7 @@ export function buildHomeThreadGroups(input: {
   }
 
   if (input.projectGroupingMode === "hierarchy") {
-    return [...result].toSorted((left, right) => {
+    return [...result].sort((left, right) => {
       const leftHierarchy = left.hierarchy;
       const rightHierarchy = right.hierarchy;
       if (leftHierarchy && rightHierarchy) {
@@ -419,7 +419,7 @@ export function buildHomeThreadGroups(input: {
   }
 
   if (input.projectSortOrder === "alphabetical") {
-    return [...result].toSorted(
+    return [...result].sort(
       (left, right) => left.title.localeCompare(right.title) || left.key.localeCompare(right.key),
     );
   }

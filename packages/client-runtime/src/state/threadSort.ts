@@ -123,7 +123,7 @@ export function sortThreads<T extends { readonly id: string } & ThreadSortInput>
   sortOrder: SidebarThreadSortOrder,
 ): T[] {
   if (sortOrder === "alphabetical") {
-    return [...threads].toSorted(
+    return [...threads].sort(
       (left, right) =>
         (left.title ?? "").localeCompare(right.title ?? "") || left.id.localeCompare(right.id),
     );
