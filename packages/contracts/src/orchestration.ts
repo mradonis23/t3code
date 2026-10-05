@@ -1134,6 +1134,7 @@ const ThreadHistoryImportCommand = Schema.Struct({
       messageId: MessageId,
       role: Schema.Literals(["user", "assistant"]),
       text: Schema.String,
+      turnId: Schema.optional(TurnId),
       createdAt: IsoDateTime,
     }),
   ).check(Schema.isNonEmpty()),

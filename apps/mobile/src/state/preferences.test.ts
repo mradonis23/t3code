@@ -62,6 +62,41 @@ function makePreferencesState(
 }
 
 describe("mobile preferences state", () => {
+  it.effect("persists external editor and explorer selections through the existing store", () =>
+    Effect.gen(function* () {
+      const savePatch = vi.fn((patch: Partial<Preferences>) => Effect.succeed(patch));
+      const state = makePreferencesState({ load: Effect.succeed({}), savePatch });
+      const registry = AtomRegistry.make();
+      const unmountPreferences = registry.mount(state.preferencesAtom);
+      const unmountUpdate = registry.mount(state.updatePreferencesAtom);
+
+      yield* AtomRegistry.getResult(registry, state.preferencesAtom, { suspendOnWaiting: true });
+      registry.set(state.updatePreferencesAtom, {
+        externalCodeEditor: "acode",
+        externalFileExplorer: "solid-explorer",
+      });
+
+      yield* Effect.promise(() =>
+        vi.waitFor(() => {
+          expect(savePatch).toHaveBeenCalledWith({
+            externalCodeEditor: "acode",
+            externalFileExplorer: "solid-explorer",
+          });
+          expect(Option.getOrThrow(AsyncResult.value(registry.get(state.preferencesAtom)))).toEqual(
+            {
+              externalCodeEditor: "acode",
+              externalFileExplorer: "solid-explorer",
+            },
+          );
+        }),
+      );
+
+      unmountUpdate();
+      unmountPreferences();
+      registry.dispose();
+    }),
+  );
+
   it.effect("shares one preference load across consumers", () =>
     Effect.gen(function* () {
       const load = vi.fn(() => Promise.resolve<Preferences>({ baseFontSize: 17 }));

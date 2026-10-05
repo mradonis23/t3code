@@ -73,6 +73,7 @@ import {
 } from "../../sidebarProjectGrouping";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { useProjects, useThreadShells } from "../../state/entities";
+import { agentSessionImport } from "../../state/agentSessions";
 import { projectEnvironment } from "../../state/projects";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -481,6 +482,8 @@ function ProjectDetail({
   const setBrowserAccess = (enabled: boolean | undefined) =>
     setBooleanOverride("projectAgentBrowserAccessOverrides", enabled);
   const deleteProject = useAtomCommand(projectEnvironment.delete, { reportFailure: false });
+  const importAgentHistory = useAtomCommand(agentSessionImport, { reportFailure: false });
+  const [isImportingHistory, setIsImportingHistory] = useState(false);
   const projectNameEditedRef = useRef(false);
 
   const faviconPath = representative.faviconPath ?? null;
@@ -507,6 +510,62 @@ function ProjectDetail({
     );
   }, []);
 
+  const importPersistedHistory = useCallback(async () => {
+    if (isImportingHistory) return;
+    setIsImportingHistory(true);
+    let importedCount = 0;
+    let skippedCount = 0;
+    try {
+      for (const member of group.memberProjects) {
+        const environment = environmentById.get(member.environmentId);
+        if (environment?.connection.phase !== "connected") {
+          toastManager.add({
+            type: "warning",
+            title: "History import skipped",
+            description: "Connect " + (environment?.label ?? "this machine") + " and try again.",
+          });
+          continue;
+        }
+        const result = await importAgentHistory({
+          environmentId: member.environmentId,
+          input: { projectId: member.id, expectedWorkspaceRoot: member.workspaceRoot },
+        });
+        if (result._tag === "Failure") {
+          if (!isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            toastManager.add({
+              type: "error",
+              title: "Conversation import failed",
+              description: error instanceof Error ? error.message : "An error occurred.",
+            });
+          }
+          continue;
+        }
+        importedCount += result.value.importedCount;
+        skippedCount += result.value.skippedCount;
+      }
+      const conversationNoun = importedCount === 1 ? "conversation" : "conversations";
+      const sourceNoun = skippedCount === 1 ? "source" : "sources";
+      toastManager.add({
+        type: "success",
+        title:
+          importedCount > 0 ? "Conversation history imported" : "Conversation history is current",
+        description:
+          importedCount > 0
+            ? "Imported " +
+              importedCount +
+              " " +
+              conversationNoun +
+              "." +
+              (skippedCount > 0 ? " " + skippedCount + " skipped." : "")
+            : skippedCount > 0
+              ? "No new conversations imported; " + skippedCount + " " + sourceNoun + " skipped."
+              : "No new persisted Codex or Claude conversations were found.",
+      });
+    } finally {
+      setIsImportingHistory(false);
+    }
+  }, [environmentById, group.memberProjects, importAgentHistory, isImportingHistory]);
   // Group-shared fields live on each physical project record, so a
   // group-level edit fans out to every member.
   const updateAllMembers = useCallback(
@@ -1380,6 +1439,22 @@ function ProjectDetail({
           ) : null}
         </SettingsSection>
 
+        <SettingsSection title="Conversation history">
+          <SettingsRow
+            title="Import persisted conversations"
+            description="Import Codex and Claude conversations saved for this project on the selected machine. T3 preserves provider resume routing and skips history it already imported."
+            control={
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={isImportingHistory}
+                onClick={() => void importPersistedHistory()}
+              >
+                {isImportingHistory ? "Importingâ€¦" : "Import conversations"}
+              </Button>
+            }
+          />
+        </SettingsSection>
         <SettingsSection title="Danger">
           <SettingsRow
             title={

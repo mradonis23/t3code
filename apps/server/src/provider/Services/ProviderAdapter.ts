@@ -64,6 +64,23 @@ export interface ProviderThreadSnapshot {
   readonly turns: ReadonlyArray<ProviderThreadTurnSnapshot>;
 }
 
+export interface ProviderThreadForkSnapshot {
+  readonly threadId: string;
+  readonly forkedFromId: string | null;
+  readonly cwd: string;
+  readonly model: string;
+  readonly modelProvider: string;
+  readonly reasoningEffort: string | null;
+  readonly turns: ReadonlyArray<{
+    readonly id: TurnId;
+    readonly items: ReadonlyArray<unknown>;
+    readonly startedAt: number | null;
+    readonly completedAt: number | null;
+    readonly status: string;
+    readonly error: { readonly message: string } | null;
+  }>;
+}
+
 export interface ProviderAdapterShape<TError> {
   /**
    * Provider kind implemented by this adapter.
@@ -130,6 +147,12 @@ export interface ProviderAdapterShape<TError> {
    * Read a provider thread snapshot.
    */
   readonly readThread: (threadId: ThreadId) => Effect.Effect<ProviderThreadSnapshot, TError>;
+
+  /** Fork a provider-native thread through an inclusive completed turn. */
+  readonly forkThread?: (
+    threadId: ThreadId,
+    lastTurnId: TurnId,
+  ) => Effect.Effect<ProviderThreadForkSnapshot, TError>;
 
   /**
    * Roll back a provider thread by N turns.

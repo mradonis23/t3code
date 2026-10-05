@@ -124,6 +124,8 @@ export interface AgentSessionThreadMessage {
   readonly role: "user" | "assistant";
   readonly text: string;
   readonly createdAt: string;
+  /** Native provider turn boundary used for exact historical branching. */
+  readonly providerTurnId?: string;
 }
 
 export interface AgentSessionThread {
@@ -286,6 +288,7 @@ export function parseAgentSessionTranscript(
   // prompt. Suppress response-user records only when the shared turn ID and a
   // verbatim event copy prove which prompt the user submitted.
   const canonicalCodexResponseUserIndices = new Set<number>();
+  const canonicalCodexTurnIdsByText = new Map<string, Array<string>>();
   let canonicalUserTextsInTurn = new Set<string>();
   let responseUsersInTurn: Array<{
     readonly index: number;
@@ -301,6 +304,9 @@ export function parseAgentSessionTranscript(
     for (const responseUser of responseUsersInTurn) {
       if (canonicalTurnIds.has(responseUser.turnId)) {
         canonicalCodexResponseUserIndices.add(responseUser.index);
+        const queue = canonicalCodexTurnIdsByText.get(responseUser.text) ?? [];
+        queue.push(responseUser.turnId);
+        canonicalCodexTurnIdsByText.set(responseUser.text, queue);
       }
     }
     canonicalUserTextsInTurn = new Set();
@@ -365,6 +371,7 @@ export function parseAgentSessionTranscript(
   };
 
   let recordIndex = -1;
+  let activeCodexTurnId: string | null = null;
   for (const record of decodedRecords()) {
     recordIndex += 1;
     if (input.source === "claudeAgent") {
@@ -411,6 +418,8 @@ export function parseAgentSessionTranscript(
     if (record.type === "event_msg" && record.payload?.type === "user_message") {
       const text = record.payload.message ?? "";
       if (text.trim().length === 0) continue;
+      const turnQueue = canonicalCodexTurnIdsByText.get(text.trim());
+      activeCodexTurnId = turnQueue?.shift() ?? activeCodexTurnId;
       // Codex can write the same prompt as both a response item and an event.
       // Remove only the matching response copy so mixed-format logs keep every
       // distinct user message.
@@ -427,6 +436,7 @@ export function parseAgentSessionTranscript(
         role: "user",
         text,
         createdAt: normalizeTimestamp(record.timestamp, fallbackTimestamp),
+        ...(activeCodexTurnId !== null ? { providerTurnId: activeCodexTurnId } : {}),
         codexResponseUser: false,
       });
       continue;
@@ -441,6 +451,10 @@ export function parseAgentSessionTranscript(
 
     const extractedText = extractText(record.payload.content);
     if (extractedText.length === 0) continue;
+    if (record.payload.role === "user") {
+      const responseTurnId = codexTurnId(record.payload.internal_chat_message_metadata_passthrough);
+      if (responseTurnId !== null) activeCodexTurnId = responseTurnId;
+    }
     if (record.payload.role === "user" && canonicalCodexResponseUserIndices.has(recordIndex)) {
       continue;
     }
@@ -451,8 +465,10 @@ export function parseAgentSessionTranscript(
       role: record.payload.role,
       text: extractedText,
       createdAt: normalizeTimestamp(record.timestamp, fallbackTimestamp),
+      ...(activeCodexTurnId !== null ? { providerTurnId: activeCodexTurnId } : {}),
       codexResponseUser: record.payload.role === "user",
     });
+    if (record.payload.role === "assistant") activeCodexTurnId = null;
   }
 
   const visibleMessages = messages.map(

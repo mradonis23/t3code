@@ -22,6 +22,7 @@ import { relativeTime } from "../../lib/time";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import { useThreadPr } from "../../state/use-thread-pr";
+import { useThreadOutboxCount } from "../../state/use-thread-outbox";
 import { ThreadSwipeable } from "../home/thread-swipe-actions";
 import { buildThreadTitleRegenerationMenuItems } from "./thread-title-regeneration-menu";
 import {
@@ -53,7 +54,7 @@ const STATUS_LABEL_BY_STATUS: Partial<
   Record<ThreadListV2Status, { label: string; className: string }>
 > = {
   approval: { label: "Approval", className: "text-warning-foreground" },
-  input: { label: "Input", className: "text-foreground-secondary" },
+  input: { label: "Needs input", className: "text-foreground-secondary" },
   working: { label: "Working", className: "text-foreground-secondary" },
   failed: { label: "Failed", className: "text-danger-foreground" },
 };
@@ -411,6 +412,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const selectedBackgroundColor = theme["--color-user-bubble"];
   const sidebarPane = props.pane === "sidebar";
   const selected = props.selected === true;
+  const queuedCount = useThreadOutboxCount(thread.environmentId, thread.id);
 
   const status = resolveThreadListV2Status(thread);
   const statusLabel = STATUS_LABEL_BY_STATUS[status];
@@ -801,6 +803,17 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           <View className="opacity-60">
             <ProviderIcon provider={props.providerDriver} size={14} />
           </View>
+        ) : null}
+        {queuedCount > 0 ? (
+          <Text
+            accessibilityLabel={`${queuedCount} queued prompt${queuedCount === 1 ? "" : "s"}`}
+            className={cn(
+              "shrink-0 text-xs",
+              selected ? "text-user-bubble-foreground-muted" : "text-foreground-tertiary",
+            )}
+          >
+            {queuedCount} queued
+          </Text>
         ) : null}
       </View>
     </>

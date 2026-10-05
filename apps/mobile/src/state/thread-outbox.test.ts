@@ -73,6 +73,9 @@ import {
   groupQueuedThreadMessages,
   isQueuedThreadCreationSendable,
   modelSelectionsEqual,
+  isThreadQueuePaused,
+  pauseQueuedThreadMessages,
+  resumeQueuedThreadMessages,
   resolveComposerDeliveryMode,
   resolveThreadOutboxDeliveryAction,
   resolveThreadOutboxDispatchStep,
@@ -279,6 +282,25 @@ describe("thread outbox", () => {
     await expect(manager.load()).resolves.toBe(true);
     expect(registry.get(manager.queuedMessagesByThreadKeyAtom)).toEqual({});
     expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("pauses every queued item and resumes exactly one safely idle item", () => {
+    const messages = [
+      queuedMessage({ messageId: "message-1", createdAt: "2026-06-08T10:00:01.000Z" }),
+      queuedMessage({ messageId: "message-2", createdAt: "2026-06-08T10:00:02.000Z" }),
+    ];
+    const paused = pauseQueuedThreadMessages(messages);
+    expect(paused.map((message) => message.deliveryMode)).toEqual(["paused", "paused"]);
+    expect(isThreadQueuePaused(paused)).toBe(true);
+    expect(resumeQueuedThreadMessages(paused, true).map((message) => message.deliveryMode)).toEqual(
+      ["immediate", "after-success"],
+    );
+    expect(
+      resumeQueuedThreadMessages(paused, false).map((message) => message.deliveryMode),
+    ).toEqual(["after-success", "after-success"]);
+    expect(decodeQueuedThreadMessage(encodeQueuedThreadMessage(paused[0]!)).deliveryMode).toBe(
+      "paused",
+    );
   });
 
   it("groups messages by scoped thread and preserves creation order", () => {

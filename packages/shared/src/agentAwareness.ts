@@ -125,7 +125,7 @@ function headlineForPhase(phase: AgentAwarenessPhase): string {
     case "waiting_for_approval":
       return "Approval needed";
     case "waiting_for_input":
-      return "Waiting for input";
+      return "Needs input";
     case "completed":
       return "Agent finished";
     case "failed":

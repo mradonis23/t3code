@@ -190,7 +190,7 @@ export function buildHomeListLayout(input: {
     for (const [pendingIndex, pendingTask] of group.pendingTasks.entries()) {
       items.push({
         type: "pending-task",
-        key: `pending-task:${pendingTask.message.messageId}`,
+        key: `pending-task:${group.key}:${pendingTask.message.messageId}`,
         pendingTask,
         isLast:
           pendingIndex === group.pendingTasks.length - 1 &&
@@ -202,7 +202,10 @@ export function buildHomeListLayout(input: {
     for (const [threadIndex, thread] of visibleThreads.entries()) {
       items.push({
         type: "thread",
-        key: `thread:${thread.environmentId}:${thread.id}`,
+        // The same thread can appear in the synthetic Recently Used group and again
+        // in its repository/project group. LegendList requires globally unique row
+        // keys; duplicate keys alias rows and reserve blank virtualized space.
+        key: `thread:${group.key}:${thread.environmentId}:${thread.id}`,
         thread,
         isLast: threadIndex === visibleThreads.length - 1 && !hasShowMoreRow,
       });

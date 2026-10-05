@@ -185,6 +185,11 @@ const ProviderRollbackConversationInput = Schema.Struct({
   numTurns: NonNegativeInt,
 });
 
+const ProviderForkThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  lastTurnId: TurnId,
+});
+
 function toValidationError(
   operation: string,
   issue: string,
@@ -2011,6 +2016,69 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       }
     });
 
+  const readThread: NonNullable<ProviderServiceMethod<"readThread">> = Effect.fn(
+    "ProviderService.readThread",
+  )(function* (input) {
+    return yield* withThreadHandoffLock(
+      input.threadId,
+      Effect.gen(function* () {
+        const routed = yield* resolveRoutableSession({
+          threadId: input.threadId,
+          operation: "ProviderService.readThread",
+          allowRecovery: true,
+        });
+        return yield* routed.adapter.readThread(routed.threadId);
+      }),
+    );
+  });
+
+  const forkThread: NonNullable<ProviderServiceMethod<"forkThread">> = Effect.fn(
+    "ProviderService.forkThread",
+  )(function* (rawInput) {
+    const input = yield* decodeInputOrValidationError({
+      operation: "ProviderService.forkThread",
+      schema: ProviderForkThreadInput,
+      payload: rawInput,
+    });
+    return yield* withThreadHandoffLock(
+      input.threadId,
+      Effect.gen(function* () {
+        const routed = yield* resolveRoutableSession({
+          threadId: input.threadId,
+          operation: "ProviderService.forkThread",
+          allowRecovery: true,
+        });
+        const fork = routed.adapter.forkThread;
+        if (fork === undefined) {
+          return yield* toValidationError(
+            "ProviderService.forkThread",
+            "The selected provider does not support native conversation branching.",
+          );
+        }
+        const sessions = yield* routed.adapter.listSessions();
+        const session = sessions.find((candidate) => candidate.threadId === routed.threadId);
+        if (
+          session === undefined ||
+          session.activeTurnId !== undefined ||
+          (session.status !== "ready" && session.status !== "error")
+        ) {
+          return yield* toValidationError(
+            "ProviderService.forkThread",
+            "The source conversation must be idle before it can be branched.",
+          );
+        }
+        yield* Effect.annotateCurrentSpan({
+          "provider.operation": "thread-fork",
+          "provider.kind": routed.adapter.provider,
+          "provider.instance_id": routed.instanceId,
+          "provider.thread_id": input.threadId,
+          "provider.last_turn_id": input.lastTurnId,
+        });
+        return yield* fork(routed.threadId, input.lastTurnId);
+      }),
+    );
+  });
+
   const rollbackConversation: ProviderServiceMethod<"rollbackConversation"> = Effect.fn(
     "rollbackConversation",
   )(function* (rawInput) {
@@ -2185,6 +2253,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     getCapabilities,
     getInstanceInfo,
     assertConversationRollbackSupported,
+    readThread,
+    forkThread,
     rollbackConversation,
     uploadFeedback,
     // Each access creates a fresh PubSub subscription so that multiple

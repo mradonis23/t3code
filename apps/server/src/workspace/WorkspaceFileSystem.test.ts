@@ -69,12 +69,13 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
           relativePath: "src/index.ts",
         });
 
-        expect(result).toEqual({
+        expect(result).toMatchObject({
           relativePath: "src/index.ts",
           contents: "export const answer = 42;\n",
           byteLength: 26,
           truncated: false,
         });
+        expect(result.revision).toMatch(/^[a-f0-9]{64}$/);
       }),
     );
 
@@ -92,12 +93,13 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
           relativePath: absolutePath,
         });
 
-        expect(result).toEqual({
+        expect(result).toMatchObject({
           relativePath: absolutePath,
           contents: "# Report\n",
           byteLength: 9,
           truncated: false,
         });
+        expect(result.revision).toMatch(/^[a-f0-9]{64}$/);
       }),
     );
 
@@ -264,8 +266,57 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
           .readFileString(path.join(cwd, "plans/effect-rpc.md"))
           .pipe(Effect.orDie);
 
-        expect(result).toEqual({ relativePath: "plans/effect-rpc.md" });
+        expect(result).toMatchObject({ relativePath: "plans/effect-rpc.md" });
+        expect(result.revision).toMatch(/^[a-f0-9]{64}$/);
         expect(saved).toBe("# Plan\n");
+      }),
+    );
+
+    it.effect("rejects stale revisions unless overwrite is explicit", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "src/app.ts", "first\n");
+        const opened = yield* workspaceFileSystem.readFile({ cwd, relativePath: "src/app.ts" });
+        expect(opened.revision).toMatch(/^[a-f0-9]{64}$/);
+        yield* writeTextFile(cwd, "src/app.ts", "host changed\n");
+
+        const conflict = yield* workspaceFileSystem
+          .writeFile({
+            cwd,
+            relativePath: "src/app.ts",
+            contents: "mobile changed\n",
+            expectedRevision: opened.revision,
+          })
+          .pipe(Effect.flip);
+        expect(conflict).toBeInstanceOf(WorkspaceFileSystem.WorkspaceFileConflictError);
+
+        const saved = yield* workspaceFileSystem.writeFile({
+          cwd,
+          relativePath: "src/app.ts",
+          contents: "mobile changed\n",
+          expectedRevision: opened.revision,
+          overwrite: true,
+        });
+        expect(saved.revision).toMatch(/^[a-f0-9]{64}$/);
+      }),
+    );
+
+    it.effect("never overwrites an existing create-only upload", () =>
+      Effect.gen(function* () {
+        const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+        const cwd = yield* makeTempDir;
+        yield* writeTextFile(cwd, "upload.txt", "host copy\n");
+
+        const conflict = yield* workspaceFileSystem
+          .writeFile({
+            cwd,
+            relativePath: "upload.txt",
+            contents: "phone copy\n",
+            createOnly: true,
+          })
+          .pipe(Effect.flip);
+        expect(conflict).toBeInstanceOf(WorkspaceFileSystem.WorkspaceFileConflictError);
       }),
     );
 
@@ -336,6 +387,25 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceFileSystemLive", (i
           .pipe(Effect.orElseSucceed(() => null));
         expect(escapedStat).toBeNull();
       }),
+    );
+    it.effect.skipIf(!symlinksSupported)(
+      "rejects writes through a symlink outside the workspace",
+      () =>
+        Effect.gen(function* () {
+          const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+          const fileSystem = yield* FileSystem.FileSystem;
+          const cwd = yield* makeTempDir;
+          const outside = yield* makeTempDir;
+          const path = yield* Path.Path;
+          yield* fileSystem.symlink(outside, path.join(cwd, "linked"));
+
+          const error = yield* workspaceFileSystem
+            .writeFile({ cwd, relativePath: "linked/escape.md", contents: "# nope\n" })
+            .pipe(Effect.flip);
+          expect(error).toBeInstanceOf(WorkspaceFileSystem.WorkspaceFilePathEscapeError);
+          const escaped = yield* Effect.result(fileSystem.stat(path.join(outside, "escape.md")));
+          expect(escaped._tag).toBe("Failure");
+        }),
     );
   });
 });

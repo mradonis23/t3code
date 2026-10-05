@@ -241,4 +241,37 @@ describe("buildHomeListLayout", () => {
     expect(layout.stickyHeaderIndices).toEqual([0, 8]);
     expect(layout.items[8]).toMatchObject({ type: "header", isFirst: false });
   });
+  it("keeps row keys unique when the same thread appears in Recently Used and its project", () => {
+    const project = makeProject("alpha", "alpha");
+    const sharedThread = makeThread("shared", project.id);
+    const recentlyUsed: HomeThreadGroup = {
+      key: "__recently-used",
+      title: "Recently Used",
+      representative: project,
+      hierarchy: null,
+      projects: [project],
+      pendingTasks: [],
+      threads: [sharedThread],
+      recentThreads: [sharedThread],
+      newThreadTarget: null,
+    };
+    const projectGroup: HomeThreadGroup = {
+      key: "project:alpha",
+      title: "alpha",
+      representative: project,
+      hierarchy: null,
+      projects: [project],
+      pendingTasks: [],
+      threads: [sharedThread],
+      recentThreads: [sharedThread],
+      newThreadTarget: project,
+    };
+
+    const layout = buildHomeListLayout({
+      groups: [recentlyUsed, projectGroup],
+      displayStates: displayStates({}),
+    });
+    const keys = layout.items.map((item) => item.key);
+    expect(new Set(keys).size).toBe(keys.length);
+  });
 });

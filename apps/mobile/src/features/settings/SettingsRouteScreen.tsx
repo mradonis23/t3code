@@ -137,9 +137,12 @@ function LocalSettingsRouteScreen() {
             value={`${environmentCount}`}
             target="SettingsEnvironments"
           />
+          {Platform.OS === "android" ? <AndroidAttentionNotificationsRow /> : null}
         </SettingsSection>
 
         <GeneralSettingsSection />
+
+        {Platform.OS === "android" ? <ExternalToolsSettingsSection /> : null}
 
         <SettingsSection title="Appearance">
           <SettingsRow icon="paintbrush" label="Appearance" target="SettingsAppearance" />
@@ -155,6 +158,67 @@ function LocalSettingsRouteScreen() {
   );
 }
 
+function AndroidAttentionNotificationsRow() {
+  const preferencesResult = useAtomValue(mobilePreferencesAtom);
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const [permissionGranted, setPermissionGranted] = useState(false);
+  const enabled =
+    permissionGranted &&
+    AsyncResult.isSuccess(preferencesResult) &&
+    preferencesResult.value.attentionNotificationsEnabled === true;
+
+  useEffect(() => {
+    void settlePromise(() => Notifications.getPermissionsAsync()).then((result) => {
+      setPermissionGranted(result._tag === "Success" && result.value.granted);
+    });
+  }, []);
+
+  const onValueChange = useCallback(
+    (next: boolean) => {
+      if (!next) {
+        savePreferences({ attentionNotificationsEnabled: false });
+        return;
+      }
+      void settleAsyncResult(() => runtime.runPromiseExit(requestAgentNotificationPermission)).then(
+        (result) => {
+          if (result._tag === "Failure") {
+            Alert.alert("Notifications unavailable", "Could not request notification permission.");
+            return;
+          }
+          if (result.value.type === "granted") {
+            setPermissionGranted(true);
+            savePreferences({ attentionNotificationsEnabled: true });
+            return;
+          }
+          setPermissionGranted(false);
+          Alert.alert(
+            "Notifications disabled",
+            result.value.type === "denied" && !result.value.canAskAgain
+              ? "Notification permission was denied. Open Android Settings to enable it."
+              : "Notifications were not enabled.",
+            result.value.type === "denied" && !result.value.canAskAgain
+              ? [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Open Settings", onPress: () => void Linking.openSettings() },
+                ]
+              : undefined,
+          );
+        },
+      );
+    },
+    [savePreferences],
+  );
+
+  return (
+    <SettingsSwitchRow
+      icon="bell.badge"
+      label="Agent Notifications"
+      subtitle="Completion, errors, usage limits, and input requests"
+      value={enabled}
+      onValueChange={onValueChange}
+    />
+  );
+}
 function ConfiguredSettingsRouteScreen() {
   const preferencesResult = useAtomValue(mobilePreferencesAtom);
   const savePreferences = useAtomSet(updateMobilePreferencesAtom);
@@ -485,47 +549,50 @@ function ConfiguredSettingsRouteScreen() {
             value={`${environmentCount}`}
             target="SettingsEnvironments"
           />
-          <SettingsSwitchRow
-            icon="bell.badge"
-            label="Device Notifications"
-            disabled={
-              !agentAwarenessPlatform.supported ||
-              !agentAwarenessPushAvailable ||
-              notificationStatus === "checking" ||
-              notificationStatus === "unsupported"
-            }
-            subtitle={agentAwarenessPlatform.subtitle}
-            // Only reads as on when this device is actually registered with the
-            // relay; otherwise notifications cannot be delivered regardless of
-            // the local iOS permission.
-            value={
-              agentAwarenessPushAvailable && notificationStatus === "enabled" && deviceRegistered
-            }
-            onValueChange={handleDeviceNotificationsChange}
-          />
-          <SettingsSwitchRow
-            disabled={
-              !agentAwarenessPlatform.supported ||
-              !agentAwarenessPushAvailable ||
-              !isLoaded ||
-              liveActivityStatus === "checking" ||
-              liveActivityStatus === "linking"
-            }
-            icon="bolt.circle"
-            label="Live Activity Updates"
-            subtitle={agentAwarenessPlatform.subtitle}
-            // Same gate: a saved preference is meaningless until the device
-            // registration the relay needs to push updates has succeeded.
-            value={
-              agentAwarenessPushAvailable &&
-              (liveActivityStatus === "enabled" || liveActivityStatus === "linking") &&
-              deviceRegistered
-            }
-            onValueChange={handleLiveActivitiesChange}
-          />
+          {Platform.OS === "android" ? (
+            <AndroidAttentionNotificationsRow />
+          ) : (
+            <SettingsSwitchRow
+              icon="bell.badge"
+              label="Device Notifications"
+              disabled={
+                !agentAwarenessPlatform.supported ||
+                !agentAwarenessPushAvailable ||
+                notificationStatus === "checking" ||
+                notificationStatus === "unsupported"
+              }
+              subtitle={agentAwarenessPlatform.subtitle}
+              value={
+                agentAwarenessPushAvailable && notificationStatus === "enabled" && deviceRegistered
+              }
+              onValueChange={handleDeviceNotificationsChange}
+            />
+          )}
+          {Platform.OS === "ios" ? (
+            <SettingsSwitchRow
+              disabled={
+                !agentAwarenessPlatform.supported ||
+                !agentAwarenessPushAvailable ||
+                !isLoaded ||
+                liveActivityStatus === "checking" ||
+                liveActivityStatus === "linking"
+              }
+              icon="bolt.circle"
+              label="Live Activity Updates"
+              subtitle={agentAwarenessPlatform.subtitle}
+              value={
+                agentAwarenessPushAvailable &&
+                (liveActivityStatus === "enabled" || liveActivityStatus === "linking") &&
+                deviceRegistered
+              }
+              onValueChange={handleLiveActivitiesChange}
+            />
+          ) : null}
         </SettingsSection>
 
         <GeneralSettingsSection />
+
+        {Platform.OS === "android" ? <ExternalToolsSettingsSection /> : null}
 
         <SettingsSection title="Appearance">
           <SettingsRow icon="paintbrush" label="Appearance" target="SettingsAppearance" />
@@ -551,6 +618,98 @@ function GeneralSettingsSection() {
   );
 }
 
+function ExternalToolsSettingsSection() {
+  const preferences = useAtomValue(mobilePreferencesAtom);
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+  const codeEditor = AsyncResult.isSuccess(preferences)
+    ? (preferences.value.externalCodeEditor ?? "t3")
+    : "t3";
+  const fileExplorer = AsyncResult.isSuccess(preferences)
+    ? (preferences.value.externalFileExplorer ?? "system")
+    : "system";
+  const editorLabel = {
+    t3: "T3",
+    acode: "Acode",
+    system: "System",
+    ask: "Ask every time",
+  }[codeEditor];
+  const explorerLabel = {
+    "solid-explorer": "Solid Explorer",
+    system: "System",
+    ask: "Ask every time",
+  }[fileExplorer];
+
+  const chooseCodeEditor = () => {
+    Alert.alert("External code editor", "Choose how workspace text files open.", [
+      { text: "T3", onPress: () => savePreferences({ externalCodeEditor: "t3" }) },
+      { text: "Acode", onPress: () => savePreferences({ externalCodeEditor: "acode" }) },
+      {
+        text: "More",
+        onPress: () =>
+          Alert.alert("External code editor", "Choose how workspace text files open.", [
+            { text: "System", onPress: () => savePreferences({ externalCodeEditor: "system" }) },
+            {
+              text: "Ask every time",
+              onPress: () => savePreferences({ externalCodeEditor: "ask" }),
+            },
+            { text: "Cancel", style: "cancel" },
+          ]),
+      },
+    ]);
+  };
+  const chooseFileExplorer = () => {
+    Alert.alert(
+      "File explorer",
+      "External apps receive a bounded file snapshot. The Windows workspace remains on the T3 host.",
+      [
+        {
+          text: "Solid Explorer",
+          onPress: () => savePreferences({ externalFileExplorer: "solid-explorer" }),
+        },
+        { text: "System", onPress: () => savePreferences({ externalFileExplorer: "system" }) },
+        {
+          text: "More",
+          onPress: () =>
+            Alert.alert("File explorer", "Choose how workspace files open.", [
+              {
+                text: "Ask every time",
+                onPress: () => savePreferences({ externalFileExplorer: "ask" }),
+              },
+              { text: "Cancel", style: "cancel" },
+            ]),
+        },
+      ],
+    );
+  };
+
+  return (
+    <SettingsSection title="Mobile External Tools">
+      <SettingsRow
+        icon="terminal"
+        label="Terminal"
+        value="T3 PowerShell"
+        onPress={() =>
+          Alert.alert(
+            "T3 PowerShell",
+            "Terminal sessions run through the authenticated T3 host in the selected workspace.",
+          )
+        }
+      />
+      <SettingsRow
+        icon="chevron.left.forwardslash.chevron.right"
+        label="Code editor"
+        value={editorLabel}
+        onPress={chooseCodeEditor}
+      />
+      <SettingsRow
+        icon="folder"
+        label="File explorer"
+        value={explorerLabel}
+        onPress={chooseFileExplorer}
+      />
+    </SettingsSection>
+  );
+}
 const AUTO_SETTLE_DEFAULT_DAYS = DEFAULT_SERVER_SETTINGS.sidebarAutoSettleAfterDays ?? 3;
 
 /**

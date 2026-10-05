@@ -1,5 +1,6 @@
 import { type EnvironmentId, type ProjectReadFileResult, WS_METHODS } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
+import * as Effect from "effect/Effect";
 import { Atom } from "effect/unstable/reactivity";
 
 import {
@@ -17,6 +18,7 @@ import {
   updateProject,
 } from "../operations/commands.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
+import { request } from "../rpc/client.ts";
 
 export type {
   CreateProjectInput,
@@ -60,6 +62,12 @@ export function createProjectEnvironmentAtoms<R, E>(
       tag: WS_METHODS.projectsSearchEntries,
       staleTimeMs: 15_000,
     }),
+    searchContents: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:projects:search-contents",
+      tag: WS_METHODS.projectsSearchContents,
+      staleTimeMs: 5_000,
+      idleTtlMs: 60_000,
+    }),
     listEntries: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:projects:list-entries",
       tag: WS_METHODS.projectsListEntries,
@@ -76,7 +84,31 @@ export function createProjectEnvironmentAtoms<R, E>(
       optimisticFileFamily(optimisticProjectFileKey(target)),
     create: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:project:create",
-      execute: (input: CreateProjectInput) => createProject(input),
+      execute: (input: CreateProjectInput) =>
+        createProject(input).pipe(
+          Effect.tap(() =>
+            request(WS_METHODS.agentSessionsImport, {
+              projectId: input.projectId,
+              expectedWorkspaceRoot: input.workspaceRoot,
+            }).pipe(
+              Effect.tap((result) =>
+                result.importedCount > 0
+                  ? Effect.logInfo("Imported persisted agent history after project creation", {
+                      projectId: input.projectId,
+                      importedCount: result.importedCount,
+                      skippedCount: result.skippedCount,
+                    })
+                  : Effect.void,
+              ),
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Automatic agent history import after project creation failed", {
+                  projectId: input.projectId,
+                  cause,
+                }),
+              ),
+            ),
+          ),
+        ),
       scheduler: projectScheduler,
       concurrency: projectConcurrency,
     }),

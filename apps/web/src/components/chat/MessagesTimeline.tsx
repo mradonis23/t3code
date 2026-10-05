@@ -25,6 +25,7 @@ const EMPTY_AGENT_PANEL_MODEL = emptyAgentPanelModel();
 const NOOP_OPEN_AGENTS = () => {};
 const NOOP_USE_ARTIFACT_TEMPLATE = () => {};
 const NOOP_OPEN_ATTACHMENT = (_attachment: ChatFileAttachment) => {};
+const EMPTY_BRANCH_TURN_IDS: ReadonlyMap<MessageId, TurnId> = new Map();
 import { resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import { toolActivityFaviconUrl } from "@t3tools/shared/favicon";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
@@ -76,6 +77,7 @@ import {
   resolveDiffThemeName,
   resolveFileDiffPath,
 } from "../../lib/diffRendering";
+import { subscribeThreadDisclosureCommands } from "../../threadInspectionBus";
 import { PREFERRED_HIGHLIGHTER } from "../../lib/syntaxHighlighting";
 import ChatMarkdown, { ChatMarkdownAssetImage } from "../ChatMarkdown";
 import { T3Wordmark } from "../T3Wordmark";
@@ -88,8 +90,10 @@ import {
   CircleAlertIcon,
   DownloadIcon,
   EyeIcon,
+  GitBranchIcon,
   GlobeIcon,
   HammerIcon,
+  LoaderCircleIcon,
   MessageCircleIcon,
   Minimize2Icon,
   MousePointerClickIcon,
@@ -215,6 +219,9 @@ interface TimelineRowSharedState {
   workGroupViewState: WorkGroupViewState;
   agentPanelModel: AgentPanelModel;
   onOpenAgents: () => void;
+  branchTurnIdByMessageId: ReadonlyMap<MessageId, TurnId>;
+  onBranchInNewChat?: ((turnId: TurnId) => void) | undefined;
+  branchingTurnId: TurnId | null;
 }
 
 interface TimelineRowActivityState {
@@ -349,6 +356,9 @@ interface MessagesTimelineProps {
   topFadeEnabled?: boolean;
   /** Non-null when older turns exist beyond the loaded window. */
   loadEarlier?: CitationHistoryPage | null;
+  branchTurnIdByMessageId?: ReadonlyMap<MessageId, TurnId>;
+  onBranchInNewChat?: ((turnId: TurnId) => void) | undefined;
+  branchingTurnId?: TurnId | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -396,6 +406,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
   loadEarlier = null,
+  branchTurnIdByMessageId = EMPTY_BRANCH_TURN_IDS,
+  onBranchInNewChat,
+  branchingTurnId = null,
 }: MessagesTimelineProps) {
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const citationThreadRef = useMemo(() => parseScopedThreadKey(routeThreadKey), [routeThreadKey]);
@@ -427,7 +440,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   }, []);
 
   const suspendEndScrollMaintenanceForDisclosure = useCallback(
-    (anchorKey: string, collapsed = false) => {
+    (anchorKey: string | null, collapsed = false) => {
       disclosureAnchorKeyRef.current = anchorKey;
       setDisclosureToggleSettling(true);
       if (disclosureSettleFrameRef.current !== null) {
@@ -496,6 +509,71 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       });
     },
     [expandedWorkGroupIds, suspendEndScrollMaintenanceForDisclosure],
+  );
+  useEffect(
+    () =>
+      subscribeThreadDisclosureCommands(routeThreadKey, (command) => {
+        suspendEndScrollMaintenanceForDisclosure(null);
+        if (command === "collapse-all") {
+          setExpandedTurnIds(new Set());
+          setExpandedWorkGroupIds(new Set());
+          return;
+        }
+
+        const collapsedRows = deriveMessagesTimelineRowsWithState(
+          {
+            timelineEntries,
+            latestTurn,
+            runningTurnId,
+            expandedTurnIds: new Set<TurnId>(),
+            expandedWorkGroupIds: new Set<string>(),
+            isWorking,
+            activeTurnStartedAt,
+            turnDiffSummaries,
+            supportsConversationRollback,
+          },
+          null,
+        ).rows;
+        const allTurnIds = new Set<TurnId>();
+        for (const row of collapsedRows) {
+          if (row.kind === "turn-fold") allTurnIds.add(row.turnId);
+        }
+
+        const turnExpandedRows = deriveMessagesTimelineRowsWithState(
+          {
+            timelineEntries,
+            latestTurn,
+            runningTurnId,
+            expandedTurnIds: allTurnIds,
+            expandedWorkGroupIds: new Set<string>(),
+            isWorking,
+            activeTurnStartedAt,
+            turnDiffSummaries,
+            supportsConversationRollback,
+          },
+          null,
+        ).rows;
+        const allWorkGroupIds = new Set<string>();
+        for (const row of turnExpandedRows) {
+          if (row.kind === "work-toggle" || row.kind === "work-live") {
+            allWorkGroupIds.add(row.groupId);
+          }
+        }
+
+        setExpandedTurnIds(allTurnIds);
+        setExpandedWorkGroupIds(allWorkGroupIds);
+      }),
+    [
+      activeTurnStartedAt,
+      isWorking,
+      latestTurn,
+      routeThreadKey,
+      runningTurnId,
+      supportsConversationRollback,
+      suspendEndScrollMaintenanceForDisclosure,
+      timelineEntries,
+      turnDiffSummaries,
+    ],
   );
 
   // An in-session interrupt leaves its turn expanded so the user keeps their
@@ -741,6 +819,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workGroupViewState,
       agentPanelModel,
       onOpenAgents,
+      branchTurnIdByMessageId,
+      onBranchInNewChat,
+      branchingTurnId,
     }),
     [
       readyCitationRequest,
@@ -765,6 +846,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       workGroupViewState,
       agentPanelModel,
       onOpenAgents,
+      branchTurnIdByMessageId,
+      onBranchInNewChat,
+      branchingTurnId,
     ],
   );
   const activityState = useMemo<TimelineRowActivityState>(
@@ -1643,6 +1727,7 @@ function AssistantMessageMeta({
         className,
       )}
     >
+      <AssistantBranchButton message={message} />
       <AssistantCopyButton
         message={message}
         showCopyButton={showCopyButton}
@@ -1659,6 +1744,38 @@ function AssistantMessageMeta({
         </Tooltip>
       )}
     </div>
+  );
+}
+
+function AssistantBranchButton({ message }: { message: ChatMessage }) {
+  const ctx = use(TimelineRowCtx);
+  const turnId = message.turnId ?? ctx.branchTurnIdByMessageId.get(message.id) ?? null;
+  if (!ctx.onBranchInNewChat || turnId === null || message.streaming) return null;
+  const busy = ctx.branchingTurnId !== null;
+  const active = ctx.branchingTurnId === turnId;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            disabled={busy}
+            aria-label="Branch in new chat"
+            aria-busy={active || undefined}
+            onClick={() => ctx.onBranchInNewChat?.(turnId)}
+          />
+        }
+      >
+        {active ? (
+          <LoaderCircleIcon className="size-3 motion-safe:animate-spin" />
+        ) : (
+          <GitBranchIcon className="size-3" />
+        )}
+      </TooltipTrigger>
+      <TooltipPopup side="top">Branch in new chat</TooltipPopup>
+    </Tooltip>
   );
 }
 

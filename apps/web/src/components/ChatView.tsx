@@ -1414,6 +1414,7 @@ export default function ChatView(props: ChatViewProps) {
   const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
   const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, "terminal close");
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
+  const branchThread = useAtomCommand(serverEnvironment.threadBranch, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
@@ -1617,6 +1618,7 @@ export default function ChatView(props: ChatViewProps) {
   >({});
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
+  const [branchingTurnId, setBranchingTurnId] = useState<TurnId | null>(null);
   const [maximizedRightPanelThreadKey, setMaximizedRightPanelThreadKey] = useState<string | null>(
     null,
   );
@@ -2841,6 +2843,68 @@ export default function ChatView(props: ChatViewProps) {
     !compactionSettled;
   const isWorking =
     phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint || isCompacting;
+  const canBranchInNewChat =
+    isServerThread &&
+    !isWorking &&
+    activeThread !== undefined &&
+    activeProviderStatus?.driver === "codex";
+  const needsBranchBoundaryRecovery =
+    canBranchInNewChat &&
+    activeThread.messages.some((message) => message.role === "assistant" && message.turnId == null);
+  const branchBoundariesQuery = useEnvironmentQuery(
+    needsBranchBoundaryRecovery
+      ? serverEnvironment.threadBranchBoundaries({
+          environmentId: activeThread.environmentId,
+          input: { threadId: activeThread.id },
+        })
+      : null,
+  );
+  const branchTurnIdByMessageId = useMemo(
+    () =>
+      new Map<MessageId, TurnId>(
+        (branchBoundariesQuery.data?.boundaries ?? []).map((boundary) => [
+          boundary.messageId,
+          boundary.turnId,
+        ]),
+      ),
+    [branchBoundariesQuery.data],
+  );
+  const handleBranchInNewChat = useCallback(
+    async (lastTurnId: TurnId) => {
+      const sourceThread = activeThread;
+      if (!canBranchInNewChat || sourceThread === undefined || branchingTurnId !== null) return;
+      setBranchingTurnId(lastTurnId);
+      try {
+        const result = await branchThread({
+          environmentId: sourceThread.environmentId,
+          input: { threadId: sourceThread.id, lastTurnId },
+        });
+        if (result._tag === "Failure") {
+          if (!isAtomCommandInterrupted(result)) {
+            const error = squashAtomCommandFailure(result);
+            toastManager.add(
+              stackedThreadToast({
+                type: "error",
+                title: "Could not branch this conversation",
+                description: error instanceof Error ? error.message : "Native Codex fork failed.",
+              }),
+            );
+          }
+          return;
+        }
+        await navigate({
+          to: "/$environmentId/$threadId",
+          params: {
+            environmentId: sourceThread.environmentId,
+            threadId: result.value.threadId,
+          },
+        });
+      } finally {
+        setBranchingTurnId(null);
+      }
+    },
+    [activeThread, branchThread, branchingTurnId, canBranchInNewChat, navigate],
+  );
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -8420,6 +8484,9 @@ export default function ChatView(props: ChatViewProps) {
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                 topFadeEnabled={!hasTimelineTopBanner}
                 loadEarlier={loadEarlierTurns}
+                branchTurnIdByMessageId={branchTurnIdByMessageId}
+                onBranchInNewChat={canBranchInNewChat ? handleBranchInNewChat : undefined}
+                branchingTurnId={branchingTurnId}
               />
 
               {/* scroll to end pill â€” shown when user has scrolled away from the live edge */}

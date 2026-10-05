@@ -24,6 +24,7 @@ import { themeColorWithAlpha } from "../../lib/mobileTheme";
 import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import type { PendingNewTask } from "../../state/use-pending-new-tasks";
 import { useThreadPr, type ThreadPrPresentation } from "../../state/use-thread-pr";
+import { useThreadOutboxCount } from "../../state/use-thread-outbox";
 import type { HomeGroupDisplayAction } from "../home/homeListItems";
 import { ThreadSwipeable } from "../home/thread-swipe-actions";
 import { buildThreadTitleRegenerationMenuItems } from "./thread-title-regeneration-menu";
@@ -451,6 +452,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
 
   const { thread, onSelectThread, onArchiveThread, onDeleteThread, onRegenerateThreadTitle } =
     props;
+  const queuedCount = useThreadOutboxCount(thread.environmentId, thread.id);
   const status = resolveThreadStatus(thread);
   const pr = useThreadPr(thread);
   const timestamp = relativeTime(
@@ -518,7 +520,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   ) : null;
 
   const subtitleRow =
-    subtitleParts.length > 0 || pr !== null ? (
+    subtitleParts.length > 0 || pr !== null || queuedCount > 0 ? (
       <View className="mt-px flex-row items-center gap-1.5">
         {subtitleParts.length > 0 ? (
           <>
@@ -564,6 +566,17 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
               {pr.label}
             </Text>
           </View>
+        ) : null}
+        {queuedCount > 0 ? (
+          <Text
+            accessibilityLabel={`${queuedCount} queued prompt${queuedCount === 1 ? "" : "s"}`}
+            className={cn(
+              "shrink-0 text-xs",
+              selected ? "text-user-bubble-foreground-muted" : "text-foreground-tertiary",
+            )}
+          >
+            {queuedCount} queued
+          </Text>
         ) : null}
       </View>
     ) : null;

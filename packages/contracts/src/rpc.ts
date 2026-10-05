@@ -29,6 +29,13 @@ import {
   FilesystemBrowseError,
 } from "./filesystem.ts";
 import {
+  ThreadBranchBoundariesInput,
+  ThreadBranchBoundariesResult,
+  ThreadBranchError,
+  ThreadBranchInput,
+  ThreadBranchResult,
+} from "./threadBranch.ts";
+import {
   AgentSessionImportInput,
   AgentSessionImportProjectChangedError,
   AgentSessionImportProjectNotFoundError,
@@ -252,6 +259,8 @@ export const WS_METHODS = {
   filesystemBrowse: "filesystem.browse",
   agentSessionsScan: "agentSessions.scan",
   agentSessionsImport: "agentSessions.import",
+  threadBranchBoundaries: "thread.branchBoundaries",
+  threadBranch: "thread.branch",
   assetsCreateUrl: "assets.createUrl",
   attachmentsCreateUploadUrl: "attachments.createUploadUrl",
   attachmentsDelete: "attachments.delete",
@@ -838,6 +847,18 @@ const WsAgentSessionsImportRpc = Rpc.make(WS_METHODS.agentSessionsImport, {
   ]),
 });
 
+const WsThreadBranchBoundariesRpc = Rpc.make(WS_METHODS.threadBranchBoundaries, {
+  payload: ThreadBranchBoundariesInput,
+  success: ThreadBranchBoundariesResult,
+  error: Schema.Union([ThreadBranchError, EnvironmentAuthorizationError]),
+});
+
+const WsThreadBranchRpc = Rpc.make(WS_METHODS.threadBranch, {
+  payload: ThreadBranchInput,
+  success: ThreadBranchResult,
+  error: Schema.Union([ThreadBranchError, EnvironmentAuthorizationError]),
+});
+
 const WsAssetsCreateUrlRpc = Rpc.make(WS_METHODS.assetsCreateUrl, {
   payload: AssetCreateUrlInput,
   success: AssetCreateUrlResult,
@@ -1250,6 +1271,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesystemBrowseRpc,
   WsAgentSessionsScanRpc,
   WsAgentSessionsImportRpc,
+  WsThreadBranchBoundariesRpc,
+  WsThreadBranchRpc,
   WsAssetsCreateUrlRpc,
   WsAttachmentsCreateUploadUrlRpc,
   WsAttachmentsDeleteRpc,

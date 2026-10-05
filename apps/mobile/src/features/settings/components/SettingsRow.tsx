@@ -92,7 +92,12 @@ export function SettingsRow(props: {
   }
 
   return (
-    <Pressable accessibilityRole="button" disabled={props.disabled} onPress={props.onPress}>
+    <Pressable
+      accessibilityLabel={props.label}
+      accessibilityRole="button"
+      disabled={props.disabled}
+      onPress={props.onPress}
+    >
       {content}
     </Pressable>
   );

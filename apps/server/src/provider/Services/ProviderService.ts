@@ -25,6 +25,7 @@ import type {
   ProviderUploadFeedbackResult,
   MessageId,
   ThreadId,
+  TurnId,
   ProviderTurnStartResult,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -32,7 +33,11 @@ import type * as Effect from "effect/Effect";
 import type * as Stream from "effect/Stream";
 
 import type { ProviderServiceError } from "../Errors.ts";
-import type { ProviderAdapterCapabilities } from "./ProviderAdapter.ts";
+import type {
+  ProviderAdapterCapabilities,
+  ProviderThreadForkSnapshot,
+  ProviderThreadSnapshot,
+} from "./ProviderAdapter.ts";
 import type { ProviderInstanceRoutingInfo } from "./ProviderAdapterRegistry.ts";
 
 /**
@@ -120,6 +125,17 @@ export interface ProviderServiceShape {
     readonly threadId: ThreadId;
     readonly numTurns: number;
   }) => Effect.Effect<void, ProviderServiceError>;
+
+  /** Read the provider-native thread after safe session recovery. */
+  readonly readThread?: (input: {
+    readonly threadId: ThreadId;
+  }) => Effect.Effect<ProviderThreadSnapshot, ProviderServiceError>;
+
+  /** Fork a provider-native thread through an inclusive completed turn. */
+  readonly forkThread?: (input: {
+    readonly threadId: ThreadId;
+    readonly lastTurnId: TurnId;
+  }) => Effect.Effect<ProviderThreadForkSnapshot, ProviderServiceError>;
 
   /**
    * Upload a thread and return the provider's shareable feedback identifier.

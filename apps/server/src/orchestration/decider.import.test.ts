@@ -7,6 +7,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as TestClock from "effect/testing/TestClock";
@@ -114,12 +115,14 @@ it.layer(NodeServices.layer)("thread history import", (it) => {
               messageId: MessageId.make(`${threadId}:000000`),
               role: "user",
               text: "Fix the bug",
+              turnId: TurnId.make("turn-import-1"),
               createdAt,
             },
             {
               messageId: MessageId.make(`${threadId}:000001`),
               role: "assistant",
               text: "Fixed",
+              turnId: TurnId.make("turn-import-1"),
               createdAt: "2026-08-24T09:00:00.000Z",
             },
           ],
@@ -130,13 +133,23 @@ it.layer(NodeServices.layer)("thread history import", (it) => {
       expect(events).toMatchObject([
         {
           type: "thread.message-sent",
-          metadata: { historyImport: true },
-          payload: { role: "user", text: "Fix the bug", turnId: null, streaming: false },
+          metadata: { historyImport: true, providerTurnId: TurnId.make("turn-import-1") },
+          payload: {
+            role: "user",
+            text: "Fix the bug",
+            turnId: TurnId.make("turn-import-1"),
+            streaming: false,
+          },
         },
         {
           type: "thread.message-sent",
-          metadata: { historyImport: true },
-          payload: { role: "assistant", text: "Fixed", turnId: null, streaming: false },
+          metadata: { historyImport: true, providerTurnId: TurnId.make("turn-import-1") },
+          payload: {
+            role: "assistant",
+            text: "Fixed",
+            turnId: TurnId.make("turn-import-1"),
+            streaming: false,
+          },
         },
         {
           type: "thread.settled",

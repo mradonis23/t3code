@@ -10,6 +10,7 @@ const PROJECT_SEARCH_ENTRIES_MAX_LIMIT = 200;
 const PROJECT_SEARCH_CONTENTS_MAX_LIMIT = 500;
 const PROJECT_WRITE_FILE_PATH_MAX_LENGTH = 512;
 const PROJECT_READ_FILE_PATH_MAX_LENGTH = 512;
+const ProjectFileRevision = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/));
 
 export const ProjectEntryKind = Schema.Literals(["file", "directory"]);
 export type ProjectEntryKind = typeof ProjectEntryKind.Type;
@@ -204,6 +205,8 @@ export const ProjectReadFileResult = Schema.Struct({
   contents: Schema.String,
   byteLength: NonNegativeInt,
   truncated: Schema.Boolean,
+  /** SHA-256 of the complete file. Missing when the read was truncated. */
+  revision: Schema.optional(ProjectFileRevision),
 });
 export type ProjectReadFileResult = typeof ProjectReadFileResult.Type;
 
@@ -212,6 +215,7 @@ export const ProjectFileFailure = Schema.Literals([
   "resolved_path_outside_root",
   "path_not_file",
   "binary_file",
+  "file_conflict",
   "operation_failed",
 ]);
 export type ProjectFileFailure = typeof ProjectFileFailure.Type;
@@ -268,11 +272,18 @@ export const ProjectWriteFileInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   relativePath: TrimmedNonEmptyString.check(Schema.isMaxLength(PROJECT_WRITE_FILE_PATH_MAX_LENGTH)),
   contents: Schema.String,
+  /** Reject the write unless the host file still has this revision. */
+  expectedRevision: Schema.optional(ProjectFileRevision),
+  /** An explicit user-confirmed conflict override. */
+  overwrite: Schema.optional(Schema.Boolean),
+  /** Reject the write if a file already exists at this path. */
+  createOnly: Schema.optional(Schema.Boolean),
 });
 export type ProjectWriteFileInput = typeof ProjectWriteFileInput.Type;
 
 export const ProjectWriteFileResult = Schema.Struct({
   relativePath: TrimmedNonEmptyString,
+  revision: ProjectFileRevision,
 });
 export type ProjectWriteFileResult = typeof ProjectWriteFileResult.Type;
 

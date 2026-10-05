@@ -2611,6 +2611,7 @@ describe("parseAgentSessionTranscript", () => {
       "Fix the actual bug",
       "Fixed",
     ]);
+    expect(thread?.messages.map((message) => message.providerTurnId)).toEqual(["turn-1", "turn-1"]);
   });
 
   it("keeps the canonical first prompt after long Codex transcripts are capped", () => {

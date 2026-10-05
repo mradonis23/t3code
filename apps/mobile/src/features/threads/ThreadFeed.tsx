@@ -1,6 +1,7 @@
 import * as Haptics from "expo-haptics";
 import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
 import { useViewabilityAmount, type LegendListRef } from "@legendapp/list/react-native";
+import { DEFAULT_TERMINAL_ID } from "@t3tools/contracts";
 import type {
   ChatAttachment,
   ChatFileAttachment,
@@ -133,6 +134,10 @@ import {
 } from "../../lib/appearancePreferences";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { useAppearanceCodeSurface } from "../settings/appearance/useAppearanceCodeSurface";
+import { useKnownTerminalSessions } from "../../state/use-terminal-session";
+import { stagePendingTerminalLaunch } from "../terminal/terminalLaunchContext";
+import { nextOpenTerminalId } from "../terminal/terminalMenu";
+import { isRunnableShellBlock } from "../terminal/runnable-command";
 import { markdownFileIconSource } from "@t3tools/mobile-markdown-text/file-icons";
 import { markdownLinkIconSource } from "@t3tools/mobile-markdown-text/link-icons";
 import {
@@ -806,6 +811,7 @@ function MarkdownCodeBlock(props: {
   readonly lineHeight: number;
   readonly textColor: string;
   readonly theme: ReviewDiffTheme;
+  readonly onRunCommand?: (command: string) => void;
 }) {
   const content = props.content.replace(/\n$/, "");
   const languageLabel = props.language?.trim() || "text";
@@ -837,13 +843,28 @@ function MarkdownCodeBlock(props: {
         >
           {languageLabel}
         </NativeText>
-        <CopyTextButton
-          accessibilityLabel="Copy code"
-          text={content}
-          tintColor={props.copyTintColor}
-          buttonSize={32}
-          iconSize={16}
-        />
+        <View className="flex-row items-center gap-1">
+          {props.onRunCommand && isRunnableShellBlock(props.language, content) ? (
+            <Pressable
+              accessibilityLabel="Run command in terminal"
+              accessibilityRole="button"
+              className="min-h-10 flex-row items-center gap-1 rounded-lg px-2"
+              onPress={() => props.onRunCommand?.(content)}
+            >
+              <SymbolView name="terminal" size={15} tintColor={props.copyTintColor} />
+              <NativeText style={{ color: props.headerTextColor, fontSize: props.fontSize }}>
+                Run
+              </NativeText>
+            </Pressable>
+          ) : null}
+          <CopyTextButton
+            accessibilityLabel="Copy code"
+            text={content}
+            tintColor={props.copyTintColor}
+            buttonSize={40}
+            iconSize={16}
+          />
+        </View>
       </View>
       <ScrollView
         horizontal
@@ -929,6 +950,7 @@ function useReviewCommentColors(): ReviewCommentColors {
 function useMarkdownStyles(
   onLinkPress: (href: string) => void,
   renderImage: MarkdownImageRenderer,
+  onRunCommand?: (command: string) => void,
 ): MarkdownStyleSets {
   const { appearance, themeAppearance } = useAppearancePreferences();
   const markdownFontSizes = useMemo(
@@ -1176,6 +1198,7 @@ function useMarkdownStyles(
           lineHeight={markdownFontSizes.codeBlockLineHeight}
           textColor={blockTextColor}
           theme={themeMode}
+          onRunCommand={onRunCommand}
         />
       ),
     });
@@ -1315,6 +1338,7 @@ function useMarkdownStyles(
     markdownUserInlineCodeText,
     nativeMarkdownTypography,
     onLinkPress,
+    onRunCommand,
     regularFontFamily,
     renderImage,
     themeMode,
@@ -1903,6 +1927,10 @@ function ThreadFeedPlaceholder(props: {
 
 export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   const navigation = useNavigation();
+  const knownTerminalSessions = useKnownTerminalSessions({
+    environmentId: props.environmentId,
+    threadId: props.threadId,
+  });
   const { themeAppearance } = useAppearancePreferences();
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const disclosureSettleFrameRef = useRef<number | null>(null);
@@ -2221,7 +2249,46 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     },
     [props.environmentId, props.threadId, props.workspaceRoot],
   );
-  const markdownStyles = useMarkdownStyles(onMarkdownLinkPress, renderMarkdownImage);
+  const handleRunCommand = useCallback(
+    (command: string) => {
+      const workspaceRoot = props.workspaceRoot;
+      if (!workspaceRoot) return;
+      Alert.alert("Run in Terminal?", command, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Run",
+          onPress: () => {
+            const terminalId = nextOpenTerminalId({
+              listedTerminalIds: knownTerminalSessions.map((session) => session.target.terminalId),
+            });
+            stagePendingTerminalLaunch({
+              target: {
+                environmentId: props.environmentId,
+                threadId: props.threadId,
+                terminalId,
+              },
+              launch: {
+                cwd: workspaceRoot,
+                worktreePath: null,
+                initialInput: `${command}\r`,
+              },
+            });
+            navigation.navigate("ThreadTerminal", {
+              environmentId: String(props.environmentId),
+              threadId: String(props.threadId),
+              ...(terminalId === DEFAULT_TERMINAL_ID ? {} : { terminalId }),
+            });
+          },
+        },
+      ]);
+    },
+    [knownTerminalSessions, navigation, props.environmentId, props.threadId, props.workspaceRoot],
+  );
+  const markdownStyles = useMarkdownStyles(
+    onMarkdownLinkPress,
+    renderMarkdownImage,
+    props.workspaceRoot ? handleRunCommand : undefined,
+  );
   const reviewCommentColors = useReviewCommentColors();
   // LegendList does not invalidate visible rows when only the renderItem closure changes.
   // Keep row-local interaction props in extraData so disclosures and copy feedback repaint.

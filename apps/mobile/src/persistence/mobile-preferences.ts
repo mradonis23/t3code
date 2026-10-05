@@ -20,8 +20,36 @@ import { MobileStorageDecodeError, MobileStorageEncodeError } from "./mobile-sto
 const PREFERENCES_KEY = "t3code.preferences";
 const PREFERENCES_FALLBACK_KEY = "t3code.preferences.fallback";
 
+export type MobileCodeEditorPreference = "t3" | "acode" | "system" | "ask";
+export type MobileFileExplorerPreference = "solid-explorer" | "system" | "ask";
+
+export interface MobileRecentWorkspaceFile {
+  readonly environmentId: string;
+  readonly cwd: string;
+  readonly path: string;
+}
+
+export type MobileExternalEditSessionState = "preparing" | "open" | "ready";
+
+export interface MobileExternalEditSession {
+  readonly snapshotId: string;
+  readonly snapshotUri: string;
+  readonly contentUri: string;
+  readonly environmentId: string;
+  readonly cwd: string;
+  readonly path: string;
+  readonly originalRevision: string;
+  readonly originalContentHash: string;
+  readonly createdAt: number;
+  readonly lastOpenedAt: number;
+  readonly lastCheckedAt: number;
+  readonly state: MobileExternalEditSessionState;
+  readonly editor: "acode" | "system";
+}
+
 export interface Preferences {
   readonly liveActivitiesEnabled?: boolean;
+  readonly attentionNotificationsEnabled?: boolean;
   readonly themeId?: MobileThemeId;
   readonly lightThemeId?: MobileThemeId;
   readonly darkThemeId?: MobileThemeId;
@@ -54,6 +82,10 @@ export interface Preferences {
   /** Fresh keys reset both shelves to collapsed when users update. */
   readonly threadListSettledShelfExpanded?: boolean;
   readonly threadListSnoozedShelfExpanded?: boolean;
+  readonly externalCodeEditor?: MobileCodeEditorPreference;
+  readonly externalFileExplorer?: MobileFileExplorerPreference;
+  readonly recentWorkspaceFiles?: ReadonlyArray<MobileRecentWorkspaceFile>;
+  readonly externalEditSessions?: ReadonlyArray<MobileExternalEditSession>;
 }
 
 export class MobilePreferencesLoadError extends Schema.TaggedErrorClass<MobilePreferencesLoadError>()(
@@ -96,6 +128,7 @@ export class MobilePreferencesStore extends Context.Service<
 function sanitizePreferences(parsed: Preferences): Preferences {
   const preferences: {
     liveActivitiesEnabled?: boolean;
+    attentionNotificationsEnabled?: boolean;
     themeId?: MobileThemeId;
     lightThemeId?: MobileThemeId;
     darkThemeId?: MobileThemeId;
@@ -117,10 +150,17 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     planModeEnabled?: boolean;
     threadListSettledShelfExpanded?: boolean;
     threadListSnoozedShelfExpanded?: boolean;
+    externalCodeEditor?: MobileCodeEditorPreference;
+    externalFileExplorer?: MobileFileExplorerPreference;
+    recentWorkspaceFiles?: ReadonlyArray<MobileRecentWorkspaceFile>;
+    externalEditSessions?: ReadonlyArray<MobileExternalEditSession>;
   } = {};
 
   if (typeof parsed.liveActivitiesEnabled === "boolean") {
     preferences.liveActivitiesEnabled = parsed.liveActivitiesEnabled;
+  }
+  if (typeof parsed.attentionNotificationsEnabled === "boolean") {
+    preferences.attentionNotificationsEnabled = parsed.attentionNotificationsEnabled;
   }
   if (
     typeof parsed.themeId === "string" &&
@@ -216,6 +256,77 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   }
   if (typeof parsed.threadListSnoozedShelfExpanded === "boolean") {
     preferences.threadListSnoozedShelfExpanded = parsed.threadListSnoozedShelfExpanded;
+  }
+  if (
+    parsed.externalCodeEditor === "t3" ||
+    parsed.externalCodeEditor === "acode" ||
+    parsed.externalCodeEditor === "system" ||
+    parsed.externalCodeEditor === "ask"
+  ) {
+    preferences.externalCodeEditor = parsed.externalCodeEditor;
+  }
+  if (
+    parsed.externalFileExplorer === "solid-explorer" ||
+    parsed.externalFileExplorer === "system" ||
+    parsed.externalFileExplorer === "ask"
+  ) {
+    preferences.externalFileExplorer = parsed.externalFileExplorer;
+  }
+  if (Array.isArray(parsed.recentWorkspaceFiles)) {
+    preferences.recentWorkspaceFiles = parsed.recentWorkspaceFiles
+      .filter(
+        (entry): entry is MobileRecentWorkspaceFile =>
+          typeof entry === "object" &&
+          entry !== null &&
+          "environmentId" in entry &&
+          typeof entry.environmentId === "string" &&
+          "cwd" in entry &&
+          typeof entry.cwd === "string" &&
+          "path" in entry &&
+          typeof entry.path === "string" &&
+          entry.environmentId.trim().length > 0 &&
+          entry.cwd.trim().length > 0 &&
+          entry.path.trim().length > 0,
+      )
+      .slice(0, 20);
+  }
+  if (Array.isArray(parsed.externalEditSessions)) {
+    const snapshotIdPattern =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const revisionPattern = /^[0-9a-f]{64}$/i;
+    preferences.externalEditSessions = parsed.externalEditSessions
+      .filter(
+        (session): session is MobileExternalEditSession =>
+          typeof session === "object" &&
+          session !== null &&
+          typeof session.snapshotId === "string" &&
+          snapshotIdPattern.test(session.snapshotId) &&
+          typeof session.snapshotUri === "string" &&
+          session.snapshotUri.trim().length > 0 &&
+          typeof session.contentUri === "string" &&
+          session.contentUri.startsWith("content://") &&
+          typeof session.environmentId === "string" &&
+          session.environmentId.trim().length > 0 &&
+          typeof session.cwd === "string" &&
+          session.cwd.trim().length > 0 &&
+          typeof session.path === "string" &&
+          session.path.trim().length > 0 &&
+          typeof session.originalRevision === "string" &&
+          revisionPattern.test(session.originalRevision) &&
+          typeof session.originalContentHash === "string" &&
+          revisionPattern.test(session.originalContentHash) &&
+          typeof session.createdAt === "number" &&
+          Number.isFinite(session.createdAt) &&
+          typeof session.lastOpenedAt === "number" &&
+          Number.isFinite(session.lastOpenedAt) &&
+          typeof session.lastCheckedAt === "number" &&
+          Number.isFinite(session.lastCheckedAt) &&
+          (session.state === "preparing" ||
+            session.state === "open" ||
+            session.state === "ready") &&
+          (session.editor === "acode" || session.editor === "system"),
+      )
+      .slice(0, 8);
   }
   return preferences;
 }

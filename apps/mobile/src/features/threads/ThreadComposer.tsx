@@ -93,6 +93,7 @@ import {
   useExistingThreadSettingsRoutePresentation,
 } from "./ThreadSettingsSheet";
 import type { ComposerSendIntent, QueuedThreadMessage } from "../../state/thread-outbox-model";
+import { PromptQueueModal } from "./PromptQueueModal";
 import { CheckpointContinuationModal } from "./CheckpointContinuationModal";
 import {
   resolveCheckpointContinuationDeliveryMode,
@@ -128,7 +129,8 @@ export interface ThreadComposerProps {
   readonly selectedThread: OrchestrationThreadShell;
   readonly hasCompactableConversation: boolean;
   readonly serverConfig: T3ServerConfig | null;
-  readonly queueCount: number;
+  readonly queuedMessages: ReadonlyArray<QueuedThreadMessage>;
+  readonly queuePaused: boolean;
   readonly checkpointContinuation: CheckpointContinuation | null;
   readonly environmentId: EnvironmentId;
   readonly projectCwd: string | null;
@@ -144,6 +146,15 @@ export interface ThreadComposerProps {
     text: string,
     deliveryMode: NonNullable<QueuedThreadMessage["deliveryMode"]>,
   ) => Promise<boolean>;
+  readonly onEditQueuedMessage: (message: QueuedThreadMessage, text: string) => Promise<boolean>;
+  readonly onDeleteQueuedMessage: (message: QueuedThreadMessage) => Promise<boolean>;
+  readonly onMoveQueuedMessage: (
+    message: QueuedThreadMessage,
+    direction: -1 | 1,
+  ) => Promise<boolean>;
+  readonly onSendQueuedMessageNow: (message: QueuedThreadMessage) => Promise<boolean>;
+  readonly onPauseQueue: () => Promise<boolean>;
+  readonly onResumeQueue: () => Promise<boolean>;
   /** `/usage-limits` resolves locally; the host decides where the report shows. Null clears it. */
   readonly onShowUsageLimits: (report: UsageLimitsReport | null) => void;
   readonly onUpdateModelSelection: (modelSelection: ModelSelection) => void;
@@ -331,6 +342,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
 
   const [previewFile, setPreviewFile] = useState<FilePreviewSource | null>(null);
   const [previewVideo, setPreviewVideo] = useState<VideoPreviewSource | null>(null);
+  const [queueVisible, setQueueVisible] = useState(false);
   const [continuationVisible, setContinuationVisible] = useState(false);
   const hasContent = props.draftMessage.trim().length > 0 || props.draftAttachments.length > 0;
   const threadBusy =
@@ -338,8 +350,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     props.selectedThread.session?.status === "starting";
   const showStopAction = !hasContent && threadBusy;
 
-  const sendLabel =
-    props.connectionState !== "connected" || threadBusy || props.queueCount > 0 ? "Queue" : "Send";
+  const sendLabel = props.connectionState !== "connected" || threadBusy ? "Queue" : "Send";
   const currentModelSelection = props.selectedThread.modelSelection;
   const currentRuntimeMode = props.selectedThread.runtimeMode;
   const modelUnavailable =
@@ -713,6 +724,21 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
             onPress={props.onReconnectEnvironment}
           />
         ) : null}
+        {props.queuedMessages.length > 0 ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={"Open prompt queue, " + props.queuedMessages.length + " queued"}
+            className="mx-3 mb-2 rounded-full bg-card px-3 py-2 active:opacity-70"
+            onPress={() => setQueueVisible(true)}
+          >
+            <Text className="text-xs text-foreground-muted" numberOfLines={1}>
+              {props.queuedMessages.length} queued ·{" "}
+              {props.queuePaused
+                ? "Paused"
+                : "Next: " + (props.queuedMessages[0]?.text || "Attachment")}
+            </Text>
+          </Pressable>
+        ) : null}
 
         {modelUnavailable ? (
           <Pressable accessibilityRole="button" className="px-3 py-2" onPress={openSettings}>
@@ -988,18 +1014,21 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
             </ComposerDictationToolbar>
           </Animated.View>
         </ComposerSurface>
-
-        {/* Queue count */}
-        {props.queueCount > 0 ? (
-          <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
-            <Text className="pt-2 text-xs text-foreground-muted">
-              {props.queueCount} queued message{props.queueCount === 1 ? "" : "s"} will send
-              automatically.
-            </Text>
-          </Animated.View>
-        ) : null}
       </Animated.View>
 
+      <PromptQueueModal
+        visible={queueVisible}
+        busy={threadBusy}
+        paused={props.queuePaused}
+        messages={props.queuedMessages}
+        onClose={() => setQueueVisible(false)}
+        onEdit={props.onEditQueuedMessage}
+        onDelete={props.onDeleteQueuedMessage}
+        onMove={props.onMoveQueuedMessage}
+        onSendNow={props.onSendQueuedMessageNow}
+        onPause={props.onPauseQueue}
+        onResume={props.onResumeQueue}
+      />
       {props.checkpointContinuation ? (
         <CheckpointContinuationModal
           visible={continuationVisible}

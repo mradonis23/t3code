@@ -99,6 +99,7 @@ import {
 import { ThreadFeed } from "./ThreadFeed";
 import type { ThreadContentPresentation } from "./threadContentPresentation";
 import { resolveThreadFeedSubmissionAnchor } from "./thread-feed-live-follow";
+import { mobileComposerPlaceholder } from "./threadPresentation";
 import type { CheckpointContinuation } from "./checkpointContinuation.logic";
 import type { ComposerSendIntent, QueuedThreadMessage } from "../../state/thread-outbox-model";
 
@@ -128,6 +129,8 @@ export interface ThreadDetailScreenProps {
   readonly projectWorkspaceRoot: string | null;
   readonly threadCwd: string | null;
   readonly selectedThreadQueueCount: number;
+  readonly selectedThreadQueuedMessages: ReadonlyArray<QueuedThreadMessage>;
+  readonly selectedThreadQueuePaused: boolean;
   readonly checkpointContinuation: CheckpointContinuation | null;
   readonly serverConfig: T3ServerConfig | null;
   readonly layoutVariant?: LayoutVariant;
@@ -145,6 +148,15 @@ export interface ThreadDetailScreenProps {
     text: string,
     deliveryMode: NonNullable<QueuedThreadMessage["deliveryMode"]>,
   ) => Promise<boolean>;
+  readonly onEditQueuedMessage: (message: QueuedThreadMessage, text: string) => Promise<boolean>;
+  readonly onDeleteQueuedMessage: (message: QueuedThreadMessage) => Promise<boolean>;
+  readonly onMoveQueuedMessage: (
+    message: QueuedThreadMessage,
+    direction: -1 | 1,
+  ) => Promise<boolean>;
+  readonly onSendQueuedMessageNow: (message: QueuedThreadMessage) => Promise<boolean>;
+  readonly onPauseQueue: () => Promise<boolean>;
+  readonly onResumeQueue: () => Promise<boolean>;
   readonly onReconnectEnvironment: () => void;
   readonly onUpdateThreadModelSelection: (modelSelection: ModelSelection) => void;
   readonly onUpdateThreadRuntimeMode: (runtimeMode: RuntimeMode) => void;
@@ -279,7 +291,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
       setKeyboardStateSuspect(false);
     }
   }, []);
-  const windowHeight = useWindowDimensions().height;
+  const { height: windowHeight, width: windowWidth } = useWindowDimensions();
   const navigationHeaderHeight = useContext(HeaderHeightContext) || insets.top + IOS_NAV_BAR_HEIGHT;
   const agentLabel = `${props.selectedThread.modelSelection.instanceId} agent`;
   const selectedThreadKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
@@ -972,7 +984,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                   editorRef={composerEditorRef}
                   draftMessage={props.draftMessage}
                   draftAttachments={props.draftAttachments}
-                  placeholder="Ask the repo agent, or run a command…"
+                  placeholder={mobileComposerPlaceholder(windowWidth)}
                   contentMaxWidth={contentMaxWidth}
                   connectionState={props.connectionStateLabel}
                   connectionError={props.connectionError}
@@ -980,7 +992,8 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                   selectedThread={props.selectedThread}
                   hasCompactableConversation={hasCompactableConversation && !props.isCompacting}
                   serverConfig={effectiveServerConfig}
-                  queueCount={props.selectedThreadQueueCount}
+                  queuedMessages={props.selectedThreadQueuedMessages}
+                  queuePaused={props.selectedThreadQueuePaused}
                   checkpointContinuation={props.checkpointContinuation}
                   environmentId={props.environmentId}
                   projectCwd={props.threadCwd ?? props.projectWorkspaceRoot}
@@ -993,6 +1006,12 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                   onStopThread={props.onStopThread}
                   onSendMessage={handleSendMessage}
                   onQueueCheckpointContinuation={props.onQueueCheckpointContinuation}
+                  onEditQueuedMessage={props.onEditQueuedMessage}
+                  onDeleteQueuedMessage={props.onDeleteQueuedMessage}
+                  onMoveQueuedMessage={props.onMoveQueuedMessage}
+                  onSendQueuedMessageNow={props.onSendQueuedMessageNow}
+                  onPauseQueue={props.onPauseQueue}
+                  onResumeQueue={props.onResumeQueue}
                   onShowUsageLimits={showUsageLimits}
                   onReconnectEnvironment={props.onReconnectEnvironment}
                   onUpdateModelSelection={props.onUpdateThreadModelSelection}

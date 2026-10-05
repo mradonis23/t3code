@@ -1049,6 +1049,21 @@ export function createServerEnvironmentAtoms<R, E>(
     }),
     configProjection,
     welcome,
+    threadBranchBoundaries: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:thread-branch-boundaries",
+      tag: WS_METHODS.threadBranchBoundaries,
+      staleTimeMs: 30_000,
+      idleTtlMs: 5 * 60_000,
+    }),
+    threadBranch: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:thread-branch",
+      tag: WS_METHODS.threadBranch,
+      concurrency: {
+        mode: "singleFlight",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.threadId, input.lastTurnId]),
+      },
+    }),
     consumeResetCredit: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:consume-reset-credit",
       tag: WS_METHODS.providerConsumeResetCredit,

@@ -9,6 +9,7 @@
  *
  * @module WorkspaceFileSystem
  */
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
 
@@ -95,11 +96,27 @@ export class WorkspaceBinaryFileError extends Schema.TaggedErrorClass<WorkspaceB
   }
 }
 
+export class WorkspaceFileConflictError extends Schema.TaggedErrorClass<WorkspaceFileConflictError>()(
+  "WorkspaceFileConflictError",
+  {
+    workspaceRoot: Schema.String,
+    relativePath: Schema.String,
+    resolvedPath: Schema.String,
+    expectedRevision: Schema.String,
+    actualRevision: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `Workspace file '${this.relativePath}' changed after it was opened.`;
+  }
+}
+
 export const WorkspaceFileSystemError = Schema.Union([
   WorkspaceFileSystemOperationError,
   WorkspaceFilePathEscapeError,
   WorkspacePathNotFileError,
   WorkspaceBinaryFileError,
+  WorkspaceFileConflictError,
 ]);
 export type WorkspaceFileSystemError = typeof WorkspaceFileSystemError.Type;
 
@@ -137,6 +154,13 @@ export const make = Effect.gen(function* () {
   const path = yield* Path.Path;
   const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+
+  const revisionOf = (contents: Uint8Array | string): string =>
+    NodeCrypto.createHash("sha256").update(contents).digest("hex");
+  const isOutsideRoot = (root: string, target: string): boolean => {
+    const relative = path.relative(root, target);
+    return relative.startsWith(`..${path.sep}`) || relative === ".." || path.isAbsolute(relative);
+  };
 
   /**
    * Resolves the file a read targets. Workspace-relative paths must stay inside the
@@ -283,6 +307,7 @@ export const make = Effect.gen(function* () {
             contents: new TextDecoder("utf-8").decode(fileBytes),
             byteLength: stat.size,
             truncated: stat.size > PROJECT_READ_FILE_MAX_BYTES,
+            revision: stat.size > PROJECT_READ_FILE_MAX_BYTES ? undefined : revisionOf(fileBytes),
           };
         }),
       (handle) =>
@@ -308,6 +333,80 @@ export const make = Effect.gen(function* () {
       workspaceRoot: input.cwd,
       relativePath: input.relativePath,
     });
+
+    const writeRealPaths = yield* Effect.tryPromise({
+      try: async () => {
+        const workspaceRoot = await NodeFSP.realpath(input.cwd);
+        let existingAncestor = target.absolutePath;
+        let resolvedTarget: string | null = null;
+        for (;;) {
+          try {
+            const resolved = await NodeFSP.realpath(existingAncestor);
+            if (existingAncestor === target.absolutePath) resolvedTarget = resolved;
+            return { workspaceRoot, existingAncestor: resolved, resolvedTarget };
+          } catch (cause) {
+            if ((cause as NodeJS.ErrnoException).code !== "ENOENT") throw cause;
+            const parent = path.dirname(existingAncestor);
+            if (parent === existingAncestor) throw cause;
+            existingAncestor = parent;
+          }
+        }
+      },
+      catch: (cause) =>
+        new WorkspaceFileSystemOperationError({
+          workspaceRoot: input.cwd,
+          relativePath: input.relativePath,
+          resolvedPath: target.absolutePath,
+          operationPath: target.absolutePath,
+          operation: "realpath-target",
+          cause,
+        }),
+    });
+    const unsafeRealPath = writeRealPaths.resolvedTarget ?? writeRealPaths.existingAncestor;
+    if (isOutsideRoot(writeRealPaths.workspaceRoot, unsafeRealPath)) {
+      return yield* new WorkspaceFilePathEscapeError({
+        workspaceRoot: input.cwd,
+        relativePath: input.relativePath,
+        resolvedWorkspaceRoot: writeRealPaths.workspaceRoot,
+        resolvedPath: unsafeRealPath,
+      });
+    }
+
+    if (input.createOnly === true && writeRealPaths.resolvedTarget !== null) {
+      return yield* new WorkspaceFileConflictError({
+        workspaceRoot: input.cwd,
+        relativePath: input.relativePath,
+        resolvedPath: writeRealPaths.resolvedTarget,
+        expectedRevision: "file-does-not-exist",
+        actualRevision: "file-exists",
+      });
+    }
+
+    if (input.expectedRevision !== undefined && input.overwrite !== true) {
+      const currentContents = yield* fileSystem.readFile(target.absolutePath).pipe(
+        Effect.mapError(
+          (cause) =>
+            new WorkspaceFileSystemOperationError({
+              workspaceRoot: input.cwd,
+              relativePath: input.relativePath,
+              resolvedPath: target.absolutePath,
+              operationPath: target.absolutePath,
+              operation: "read",
+              cause,
+            }),
+        ),
+      );
+      const actualRevision = revisionOf(currentContents);
+      if (actualRevision !== input.expectedRevision) {
+        return yield* new WorkspaceFileConflictError({
+          workspaceRoot: input.cwd,
+          relativePath: input.relativePath,
+          resolvedPath: target.absolutePath,
+          expectedRevision: input.expectedRevision,
+          actualRevision,
+        });
+      }
+    }
 
     yield* fileSystem.makeDirectory(path.dirname(target.absolutePath), { recursive: true }).pipe(
       Effect.mapError(
@@ -336,7 +435,7 @@ export const make = Effect.gen(function* () {
       ),
     );
     yield* workspaceEntries.refresh(input.cwd);
-    return { relativePath: target.relativePath };
+    return { relativePath: target.relativePath, revision: revisionOf(input.contents) };
   });
 
   return WorkspaceFileSystem.of({ readFile, writeFile });

@@ -625,7 +625,11 @@ export function ReviewSheet(props: ReviewSheetProps) {
 
     return <>{children}</>;
   }, [error, parsedDiffNotice]);
+  const reviewWorkspaceIdentity = [environment.presentation?.entry.target.label, selectedThreadCwd]
+    .filter((value): value is string => Boolean(value))
+    .join(" - ");
   const headerSubtitle = [
+    reviewWorkspaceIdentity,
     headerDiffSummary.additions,
     headerDiffSummary.deletions,
     pendingReviewCommentCount > 0
@@ -659,7 +663,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
       {isAndroid ? (
         <AndroidScreenHeader
           title="Review changes"
-          subtitle={androidHeaderSubtitle || "Select a diff"}
+          subtitle={reviewWorkspaceIdentity || androidHeaderSubtitle || "Select a diff"}
           onBack={handleReturnToThread}
           trailing={
             showSectionToolbar ? (

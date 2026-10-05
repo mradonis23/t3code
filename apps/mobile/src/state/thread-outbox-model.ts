@@ -143,6 +143,28 @@ export function prioritizeQueuedThreadMessage(
   ];
 }
 
+export function pauseQueuedThreadMessages(
+  messages: ReadonlyArray<QueuedThreadMessage>,
+): ReadonlyArray<QueuedThreadMessage> {
+  return messages.map((message) =>
+    message.deliveryMode === "paused" ? message : { ...message, deliveryMode: "paused" as const },
+  );
+}
+
+export function resumeQueuedThreadMessages(
+  messages: ReadonlyArray<QueuedThreadMessage>,
+  safelyIdle: boolean,
+): ReadonlyArray<QueuedThreadMessage> {
+  return messages.map((message, index) => ({
+    ...message,
+    deliveryMode: safelyIdle && index === 0 ? ("immediate" as const) : ("after-success" as const),
+  }));
+}
+
+export function isThreadQueuePaused(messages: ReadonlyArray<QueuedThreadMessage>): boolean {
+  return messages.length > 0 && messages.every((message) => message.deliveryMode === "paused");
+}
+
 export function resolveQueuedThreadSettings(
   message: QueuedThreadMessage,
   thread: ThreadSettingsSnapshot,

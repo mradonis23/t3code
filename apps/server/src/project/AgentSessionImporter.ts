@@ -13,6 +13,7 @@ import {
   ProjectId,
   ProviderDriverKind,
   ThreadId,
+  TurnId,
   type AgentSessionImportInput,
   type AgentSessionImportResult,
   type OrchestrationThread,
@@ -266,6 +267,7 @@ export const importRecentAgentThreads = Effect.fn("importRecentAgentThreads")(fu
               messageId: MessageId.make(`${threadId}:${String(index).padStart(6, "0")}`),
               role: message.role,
               text: message.text,
+              ...(message.providerTurnId ? { turnId: TurnId.make(message.providerTurnId) } : {}),
               createdAt: message.createdAt,
             })),
           });

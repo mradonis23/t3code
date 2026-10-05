@@ -55,8 +55,14 @@ import {
 import { setPendingConnectionError } from "../state/use-remote-environment-registry";
 import { useSelectedThreadDetail } from "../state/use-thread-detail";
 import { useThreadSelection } from "../state/use-thread-selection";
-import { enqueueThreadOutboxMessage } from "./thread-outbox";
+import { enqueueThreadOutboxMessage, updateThreadOutboxMessage } from "./thread-outbox";
+import { removeThreadOutboxMessage } from "./thread-outbox-removal";
 import {
+  isThreadQueuePaused,
+  pauseQueuedThreadMessages,
+  prioritizeQueuedThreadMessage,
+  reorderQueuedThreadMessages,
+  resumeQueuedThreadMessages,
   resolveComposerDeliveryMode,
   type ComposerSendIntent,
   type QueuedThreadMessage,
@@ -158,6 +164,7 @@ export function useThreadComposerState() {
   const draftMessage = selectedDraft?.text ?? "";
   const draftAttachments = selectedDraft?.attachments ?? [];
   const selectedThreadQueueCount = selectedThreadQueuedMessages.length;
+  const selectedThreadQueuePaused = isThreadQueuePaused(selectedThreadQueuedMessages);
   const selectedThread = selectedThreadDetail ?? selectedThreadShell;
   const modelSelection = selectedDraft?.modelSelection ?? selectedThread?.modelSelection ?? null;
   const runtimeMode = selectedDraft?.runtimeMode ?? selectedThread?.runtimeMode ?? null;
@@ -617,9 +624,133 @@ export function useThreadComposerState() {
     [selectedEnvironmentRuntime?.serverConfig, selectedThread?.modelSelection, selectedThreadKey],
   );
 
+  const updateQueuedMessage = useCallback(
+    async (message: QueuedThreadMessage, patch: Partial<QueuedThreadMessage>) => {
+      try {
+        return await updateThreadOutboxMessage({ ...message, ...patch });
+      } catch (error) {
+        setPendingConnectionError(
+          error instanceof Error ? error.message : "Failed to update the queued message.",
+        );
+        return false;
+      }
+    },
+    [],
+  );
+
+  const onEditQueuedMessage = useCallback(
+    (message: QueuedThreadMessage, text: string) =>
+      updateQueuedMessage(message, { text: text.trim() }),
+    [updateQueuedMessage],
+  );
+
+  const onDeleteQueuedMessage = useCallback(async (message: QueuedThreadMessage) => {
+    try {
+      return await removeThreadOutboxMessage(message);
+    } catch (error) {
+      setPendingConnectionError(
+        error instanceof Error ? error.message : "Failed to delete the queued message.",
+      );
+      return false;
+    }
+  }, []);
+
+  const onMoveQueuedMessage = useCallback(
+    async (message: QueuedThreadMessage, direction: -1 | 1) => {
+      const reordered = reorderQueuedThreadMessages(
+        selectedThreadQueuedMessages,
+        message.messageId,
+        direction,
+      );
+      if (reordered === selectedThreadQueuedMessages) return false;
+      for (const candidate of reordered) {
+        const previous = selectedThreadQueuedMessages.find(
+          (entry) => entry.messageId === candidate.messageId,
+        );
+        if (previous && previous.createdAt !== candidate.createdAt) {
+          if (!(await updateQueuedMessage(previous, { createdAt: candidate.createdAt }))) {
+            return false;
+          }
+        }
+      }
+      return true;
+    },
+    [selectedThreadQueuedMessages, updateQueuedMessage],
+  );
+
+  const onSendQueuedMessageNow = useCallback(
+    async (message: QueuedThreadMessage) => {
+      const targetMode =
+        selectedThread?.session?.status === "running" ||
+        selectedThread?.session?.status === "starting"
+          ? "steer"
+          : "immediate";
+      const prioritized = prioritizeQueuedThreadMessage(
+        selectedThreadQueuedMessages,
+        message.messageId,
+        targetMode,
+      );
+      if (prioritized === selectedThreadQueuedMessages) return false;
+      for (const candidate of prioritized) {
+        const previous = selectedThreadQueuedMessages.find(
+          (entry) => entry.messageId === candidate.messageId,
+        );
+        if (
+          previous &&
+          (previous.createdAt !== candidate.createdAt ||
+            previous.deliveryMode !== candidate.deliveryMode) &&
+          !(await updateQueuedMessage(previous, {
+            createdAt: candidate.createdAt,
+            deliveryMode: candidate.deliveryMode,
+          }))
+        ) {
+          return false;
+        }
+      }
+      return true;
+    },
+    [selectedThread, selectedThreadQueuedMessages, updateQueuedMessage],
+  );
+
+  const updateWholeQueue = useCallback(
+    async (next: ReadonlyArray<QueuedThreadMessage>) => {
+      for (const candidate of next) {
+        const previous = selectedThreadQueuedMessages.find(
+          (message) => message.messageId === candidate.messageId,
+        );
+        if (
+          previous &&
+          previous.deliveryMode !== candidate.deliveryMode &&
+          !(await updateQueuedMessage(previous, { deliveryMode: candidate.deliveryMode }))
+        ) {
+          return false;
+        }
+      }
+      return true;
+    },
+    [selectedThreadQueuedMessages, updateQueuedMessage],
+  );
+
+  const onPauseQueue = useCallback(
+    () => updateWholeQueue(pauseQueuedThreadMessages(selectedThreadQueuedMessages)),
+    [selectedThreadQueuedMessages, updateWholeQueue],
+  );
+
+  const onResumeQueue = useCallback(() => {
+    const sessionStatus = selectedThread?.session?.status;
+    const safelyIdle =
+      sessionStatus !== "running" &&
+      sessionStatus !== "starting" &&
+      sessionStatus !== "error" &&
+      selectedThread?.latestTurn?.state !== "error";
+    return updateWholeQueue(resumeQueuedThreadMessages(selectedThreadQueuedMessages, safelyIdle));
+  }, [selectedThread, selectedThreadQueuedMessages, updateWholeQueue]);
+
   return {
     selectedThreadFeed,
     selectedThreadQueueCount,
+    selectedThreadQueuePaused,
+    selectedThreadQueuedMessages,
     activeWorkStartedAt,
     isCompacting,
     draftMessage,
@@ -635,6 +766,12 @@ export function useThreadComposerState() {
     onRemoveDraftImage,
     onSendMessage,
     onQueueCheckpointContinuation,
+    onEditQueuedMessage,
+    onDeleteQueuedMessage,
+    onMoveQueuedMessage,
+    onSendQueuedMessageNow,
+    onPauseQueue,
+    onResumeQueue,
     onUpdateModelSelection,
     onUpdateRuntimeMode,
     onUpdateInteractionMode,

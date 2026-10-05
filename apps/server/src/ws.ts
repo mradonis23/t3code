@@ -65,6 +65,7 @@ import {
   RpcClientId,
   EnvironmentAuthorizationError,
   ThreadId,
+  ThreadBranchError,
   type TerminalAttachStreamEvent,
   type TerminalError,
   type TerminalEvent,
@@ -127,6 +128,7 @@ import * as ReviewService from "./review/ReviewService.ts";
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import { importRecentAgentThreads } from "./project/AgentSessionImporter.ts";
+import { branchThread, getThreadBranchBoundaries } from "./project/ThreadBranchService.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import * as BackgroundPolicy from "./background/BackgroundPolicy.ts";
@@ -156,6 +158,19 @@ import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
 import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
+const isThreadBranchError = Schema.is(ThreadBranchError);
+const toThreadBranchError = (
+  cause: unknown,
+  code: "provider-unavailable" | "fork-failed",
+  fallback: string,
+) =>
+  isThreadBranchError(cause)
+    ? cause
+    : new ThreadBranchError({
+        code,
+        message:
+          cause instanceof Error && cause.message.trim().length > 0 ? cause.message : fallback,
+      });
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const CONFIG_DISCOVERY_TIMEOUT = Duration.seconds(5);
@@ -293,6 +308,8 @@ function projectFileFailureContext(
       return { failure: "path_not_file", resolvedPath: error.resolvedPath };
     case "WorkspaceBinaryFileError":
       return { failure: "binary_file", resolvedPath: error.resolvedPath };
+    case "WorkspaceFileConflictError":
+      return { failure: "file_conflict", resolvedPath: error.resolvedPath };
     default:
       return unexpectedCompatibilityError(error);
   }
@@ -2384,6 +2401,53 @@ const makeWsRpcLayer = (
               ),
             ),
             { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.threadBranchBoundaries]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.threadBranchBoundaries,
+            getThreadBranchBoundaries(input).pipe(
+              Effect.provideService(
+                ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+                projectionSnapshotQuery,
+              ),
+              Effect.provideService(
+                ProviderSessionDirectory.ProviderSessionDirectory,
+                providerSessionDirectory,
+              ),
+              Effect.provideService(ProviderService.ProviderService, providerService),
+              Effect.mapError((cause) =>
+                toThreadBranchError(
+                  cause,
+                  "provider-unavailable",
+                  "Native Codex history is unavailable.",
+                ),
+              ),
+            ),
+            { "rpc.aggregate": "thread" },
+          ),
+        [WS_METHODS.threadBranch]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.threadBranch,
+            branchThread(input).pipe(
+              Effect.provideService(
+                ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+                projectionSnapshotQuery,
+              ),
+              Effect.provideService(
+                ProviderSessionDirectory.ProviderSessionDirectory,
+                providerSessionDirectory,
+              ),
+              Effect.provideService(ProviderService.ProviderService, providerService),
+              Effect.provideService(
+                OrchestrationEngine.OrchestrationEngineService,
+                orchestrationEngine,
+              ),
+              Effect.provideService(Crypto.Crypto, crypto),
+              Effect.mapError((cause) =>
+                toThreadBranchError(cause, "fork-failed", "Native Codex fork failed."),
+              ),
+            ),
+            { "rpc.aggregate": "thread" },
           ),
         [WS_METHODS.assetsCreateUrl]: (input) =>
           observeRpcEffect(

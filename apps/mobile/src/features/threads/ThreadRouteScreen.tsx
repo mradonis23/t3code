@@ -825,6 +825,8 @@ function ThreadRouteContent(
           projectWorkspaceRoot={selectedThreadProject?.workspaceRoot ?? null}
           threadCwd={selectedThreadCwd}
           selectedThreadQueueCount={composer.selectedThreadQueueCount}
+          selectedThreadQueuedMessages={composer.selectedThreadQueuedMessages}
+          selectedThreadQueuePaused={composer.selectedThreadQueuePaused}
           checkpointContinuation={checkpointContinuation}
           layoutVariant={layout.variant}
           usesAutomaticContentInsets={usesNativeHeaderGlass}
@@ -838,6 +840,12 @@ function ThreadRouteContent(
           onStopThread={handleStopThread}
           onSendMessage={composer.onSendMessage}
           onQueueCheckpointContinuation={composer.onQueueCheckpointContinuation}
+          onEditQueuedMessage={composer.onEditQueuedMessage}
+          onDeleteQueuedMessage={composer.onDeleteQueuedMessage}
+          onMoveQueuedMessage={composer.onMoveQueuedMessage}
+          onSendQueuedMessageNow={composer.onSendQueuedMessageNow}
+          onPauseQueue={composer.onPauseQueue}
+          onResumeQueue={composer.onResumeQueue}
           onReconnectEnvironment={handleReconnectEnvironment}
           onUpdateThreadModelSelection={composer.onUpdateModelSelection}
           onUpdateThreadRuntimeMode={composer.onUpdateRuntimeMode}

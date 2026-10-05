@@ -53,7 +53,7 @@ export function resolveThreadStatus(
   if (thread.hasPendingUserInput) {
     return {
       kind: "awaiting-input",
-      label: "Awaiting Input",
+      label: "Needs input",
       pillClassName: "bg-primary/10",
       textClassName: "text-foreground-secondary",
       iconColor: "#5e5ce6",
@@ -115,4 +115,11 @@ export function resolveThreadStatus(
   }
 
   return null;
+}
+
+/** Compact capability hint; the cover-display form is deliberately one short line. */
+export function mobileComposerPlaceholder(width: number): string {
+  if (width < 400) return "Ask · @ · $ · /";
+  if (width < 600) return "Ask · @ files · $ skills · /";
+  return "Ask anything · @ files · $ skills · / commands";
 }

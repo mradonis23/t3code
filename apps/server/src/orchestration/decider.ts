@@ -1440,7 +1440,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             aggregateId: command.threadId,
             occurredAt: message.createdAt,
             commandId: command.commandId,
-            metadata: { historyImport: true },
+            metadata: {
+              historyImport: true,
+              ...(message.turnId !== undefined ? { providerTurnId: message.turnId } : {}),
+            },
           })),
           type: "thread.message-sent",
           payload: {
@@ -1448,7 +1451,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             messageId: message.messageId,
             role: message.role,
             text: message.text,
-            turnId: null,
+            turnId: message.turnId ?? null,
             streaming: false,
             createdAt: message.createdAt,
             updatedAt: message.createdAt,

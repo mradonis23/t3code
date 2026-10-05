@@ -1,11 +1,12 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentShellStatus } from "@t3tools/client-runtime/state/shell";
-import type { EnvironmentId, MessageId } from "@t3tools/contracts";
+import type { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
 import { appAtomRegistry } from "./atom-registry";
 import { environmentShell } from "./shell";
 import { threadOutboxManager } from "./thread-outbox";
+import { scopedThreadKey } from "../lib/scopedEntities";
 
 const threadOutboxShellStatusesAtom = Atom.make(
   (get): ReadonlyMap<EnvironmentId, EnvironmentShellStatus> => {
@@ -19,6 +20,12 @@ const threadOutboxShellStatusesAtom = Atom.make(
     return statuses;
   },
 ).pipe(Atom.withLabel("mobile:thread-outbox:shell-statuses"));
+
+const threadOutboxCountAtom = Atom.family((threadKey: string) =>
+  Atom.make(
+    (get) => get(threadOutboxManager.queuedMessagesByThreadKeyAtom)[threadKey]?.length ?? 0,
+  ).pipe(Atom.withLabel(`mobile:thread-outbox:count:${threadKey}`)),
+);
 
 /**
  * Queued pending tasks the outbox drain must not deliver right now: the one
@@ -56,6 +63,10 @@ export function releaseEditingQueuedMessage(messageId: MessageId): void {
 
 export function useThreadOutboxMessages() {
   return useAtomValue(threadOutboxManager.queuedMessagesByThreadKeyAtom);
+}
+
+export function useThreadOutboxCount(environmentId: EnvironmentId, threadId: ThreadId): number {
+  return useAtomValue(threadOutboxCountAtom(scopedThreadKey(environmentId, threadId)));
 }
 
 export function useThreadOutboxShellStatuses() {
