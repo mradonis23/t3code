@@ -151,6 +151,90 @@ describe("environment shell synchronization", () => {
     }),
   );
 
+  it.effect(
+    "returns a synchronized shell to live after a ready connection recovers without a pending marker",
+    () =>
+      Effect.gen(function* () {
+        const events = yield* Queue.unbounded<OrchestrationShellStreamItem>();
+        const client = {
+          [ORCHESTRATION_WS_METHODS.subscribeShell]: () => Stream.fromQueue(events),
+        } as unknown as WsRpcProtocolClient;
+        const supervisorState = yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE);
+        const activeSession = yield* SubscriptionRef.make<Option.Option<RpcSession.RpcSession>>(
+          Option.some(session(client)),
+        );
+        const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+          target: TARGET,
+          state: supervisorState,
+          session: activeSession,
+          prepared: yield* SubscriptionRef.make(Option.some(PREPARED)),
+          connect: Effect.void,
+          disconnect: Effect.void,
+          retryNow: Effect.void,
+        } satisfies EnvironmentSupervisor.EnvironmentSupervisor["Service"]);
+        const cache = Persistence.EnvironmentCacheStore.of({
+          loadShell: () => Effect.succeed(Option.some(LIVE_SHELL_SNAPSHOT)),
+          saveShell: () => Effect.void,
+          loadThread: () => Effect.succeed(Option.none()),
+          saveThread: () => Effect.void,
+          removeThread: () => Effect.void,
+          loadServerConfig: () => Effect.succeed(Option.none()),
+          saveServerConfig: () => Effect.void,
+          loadVcsRefs: () => Effect.succeed(Option.none()),
+          saveVcsRefs: () => Effect.void,
+          removeVcsRefs: () => Effect.void,
+          clearVcsRefs: () => Effect.void,
+          clear: () => Effect.void,
+        });
+        const snapshotLoader = ShellSnapshotLoader.of({
+          load: () => Effect.succeed(Option.some(LIVE_SHELL_SNAPSHOT)),
+        });
+        const shellState = yield* makeEnvironmentShellState().pipe(
+          Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+          Effect.provideService(Persistence.EnvironmentCacheStore, cache),
+          Effect.provideService(ShellSnapshotLoader, snapshotLoader),
+        );
+
+        yield* Queue.offer(events, { kind: "synchronized" });
+        yield* SubscriptionRef.changes(shellState).pipe(
+          Stream.filter((state) => state.status === "live"),
+          Stream.runHead,
+        );
+
+        yield* SubscriptionRef.set(supervisorState, {
+          desired: true,
+          network: "online",
+          phase: "connecting",
+          stage: "synchronizing",
+          attempt: 2,
+          generation: 1,
+          lastFailure: null,
+          retryAt: null,
+        });
+        yield* SubscriptionRef.changes(shellState).pipe(
+          Stream.filter((state) => state.status === "synchronizing"),
+          Stream.runHead,
+        );
+
+        yield* SubscriptionRef.set(supervisorState, {
+          desired: true,
+          network: "online",
+          phase: "connected",
+          stage: null,
+          attempt: 2,
+          generation: 1,
+          lastFailure: null,
+          retryAt: null,
+        });
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if ((yield* SubscriptionRef.get(shellState)).status === "live") break;
+          yield* Effect.yieldNow;
+        }
+
+        expect((yield* SubscriptionRef.get(shellState)).status).toBe("live");
+      }),
+  );
+
   it.effect("requests a full socket snapshot when the HTTP refresh fails", () =>
     Effect.gen(function* () {
       const cachedSnapshot: OrchestrationShellSnapshot = {
