@@ -24,15 +24,17 @@ describe("mobileApplicationActiveWakeup", () => {
   });
 
   it.each([0, 9_999, 10_000, 60_000, 3_600_000])(
-    "uses the tolerant liveness probe on Android after %i ms in the background",
+    "uses a health-only tolerant liveness probe on Android after %i ms in the background",
     (elapsed) => {
       expect(mobileApplicationActiveWakeup(20_000, 20_000 + elapsed, "android")).toBe(
-        "application-active",
+        "application-active-health",
       );
     },
   );
 
   it("probes Android on activation without a recorded background event", () => {
-    expect(mobileApplicationActiveWakeup(null, 20_000, "android")).toBe("application-active");
+    expect(mobileApplicationActiveWakeup(null, 20_000, "android")).toBe(
+      "application-active-health",
+    );
   });
 });

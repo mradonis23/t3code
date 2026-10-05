@@ -330,6 +330,13 @@ describe("environment shell synchronization", () => {
         Stream.runHead,
       );
 
+      yield* Queue.offer(wakeups, "application-active-health");
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        yield* Effect.yieldNow;
+      }
+      expect(yield* Ref.get(capturedAfterSequences)).toEqual([10]);
+      expect(yield* Ref.get(loaderCalls)).toBe(1);
+
       yield* Queue.offer(wakeups, "application-active");
       for (let attempt = 0; attempt < 100; attempt += 1) {
         if ((yield* Ref.get(capturedAfterSequences)).length >= 2) break;
