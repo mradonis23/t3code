@@ -213,13 +213,14 @@ function bindingResumesCodexSession(
   binding: ProviderSessionDirectory.ProviderRuntimeBinding,
   providerSessionId: string,
 ): boolean {
+  const resumeCursor = binding.resumeCursor;
   return (
     binding.provider === "codex" &&
     binding.status === "stopped" &&
-    typeof binding.resumeCursor === "object" &&
-    binding.resumeCursor !== null &&
-    "threadId" in binding.resumeCursor &&
-    binding.resumeCursor.threadId === providerSessionId
+    typeof resumeCursor === "object" &&
+    resumeCursor !== null &&
+    "threadId" in resumeCursor &&
+    resumeCursor.threadId === providerSessionId
   );
 }
 /** Import recent transcript text and persist the cursor needed to resume its provider session. */

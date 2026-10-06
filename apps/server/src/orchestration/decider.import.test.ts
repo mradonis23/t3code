@@ -241,7 +241,7 @@ it.layer(NodeServices.layer)("thread history import", (it) => {
           updatedAt: createdAt,
         },
       });
-      const readModel = yield* projectEvent(withImported, {
+      const withT3Activity = yield* projectEvent(withImported, {
         sequence: 3,
         eventId: EventId.make("event-roundtrip-t3-b"),
         aggregateKind: "thread",
@@ -261,6 +261,31 @@ it.layer(NodeServices.layer)("thread history import", (it) => {
           streaming: false,
           createdAt: "2026-08-24T10:01:00.000Z",
           updatedAt: "2026-08-24T10:01:00.000Z",
+        },
+      });
+      const readModel = yield* projectEvent(withT3Activity, {
+        sequence: 4,
+        eventId: EventId.make("event-roundtrip-session-stopped"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        type: "thread.session-set",
+        occurredAt: "2026-08-24T10:01:10.000Z",
+        commandId: CommandId.make("command-roundtrip-session-stopped"),
+        causationEventId: null,
+        correlationId: CommandId.make("command-roundtrip-session-stopped"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "stopped",
+            providerName: "codex",
+            providerInstanceId: ProviderInstanceId.make("codex_mom"),
+            runtimeMode: "full-access",
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: "2026-08-24T10:01:10.000Z",
+          },
         },
       });
       const events = yield* decideOrchestrationCommand({

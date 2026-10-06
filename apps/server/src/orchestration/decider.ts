@@ -1414,7 +1414,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       if (
         thread.deletedAt !== null ||
         thread.archivedAt !== null ||
-        thread.session !== null ||
+        (thread.session !== null && thread.session.status !== "stopped") ||
         hasOpenBlockingRequest(thread)
       ) {
         return yield* new OrchestrationCommandInvariantError({
