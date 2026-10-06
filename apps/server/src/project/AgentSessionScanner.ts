@@ -521,8 +521,13 @@ function isT3ManagedWorktree(
   );
 }
 
-/** Extract `cwd` from a session-meta record, tolerating the shapes each CLI writes. */
-function extractCwd(line: string): string | null {
+interface SessionMetadata {
+  readonly cwd: string;
+  readonly creatorAccountId: string | null;
+}
+
+/** Extract session metadata, tolerating the shapes each CLI writes. */
+function extractSessionMetadata(line: string): SessionMetadata | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(line);
@@ -533,17 +538,28 @@ function extractCwd(line: string): string | null {
 
   const record = parsed as Record<string, unknown>;
   if (typeof record.cwd === "string" && record.cwd.trim().length > 0) {
-    return record.cwd;
+    return { cwd: record.cwd, creatorAccountId: null };
   }
   // Codex nests session metadata under `payload`.
   const payload = record.payload;
   if (typeof payload === "object" && payload !== null) {
-    const nested = (payload as Record<string, unknown>).cwd;
-    if (typeof nested === "string" && nested.trim().length > 0) {
-      return nested;
+    const nested = payload as Record<string, unknown>;
+    if (typeof nested.cwd === "string" && nested.cwd.trim().length > 0) {
+      return {
+        cwd: nested.cwd,
+        creatorAccountId:
+          typeof nested.creator_account_id === "string" &&
+          nested.creator_account_id.trim().length > 0
+            ? nested.creator_account_id
+            : null,
+      };
     }
   }
   return null;
+}
+
+function extractCwd(line: string): string | null {
+  return extractSessionMetadata(line)?.cwd ?? null;
 }
 
 function transcriptIdentity(filePath: string, stats: FileSystem.File.Info) {
@@ -605,6 +621,22 @@ export const make = Effect.gen(function* () {
   const statOption = (target: string) =>
     fileSystem.stat(target).pipe(Effect.map(Option.some), Effect.orElseSucceed(Option.none));
 
+  const readCodexAccountId = (homePath: string) =>
+    fileSystem.readFileString(path.join(homePath, "auth.json")).pipe(
+      Effect.map((contents) => {
+        try {
+          const parsed = JSON.parse(contents) as {
+            readonly tokens?: { readonly account_id?: unknown };
+          };
+          const accountId = parsed.tokens?.account_id;
+          return typeof accountId === "string" && accountId.trim().length > 0 ? accountId : null;
+        } catch {
+          return null;
+        }
+      }),
+      Effect.orElseSucceed(() => null),
+    );
+
   /** Match directory aliases without assuming the host volume is case-insensitive. */
   const directoryIdentity = Effect.fn("AgentSessionScanner.directoryIdentity")(function* (
     target: string,
@@ -628,7 +660,7 @@ export const make = Effect.gen(function* () {
 
   // A large history snapshot can precede session metadata. Read bounded
   // chunks until a complete record names its cwd or the safety budget ends.
-  const readCwd = Effect.fn("AgentSessionScanner.readCwd")(function* (
+  const readSessionMetadata = Effect.fn("AgentSessionScanner.readSessionMetadata")(function* (
     transcript: TranscriptCandidate,
     budget: MetadataReadBudget,
   ) {
@@ -665,7 +697,9 @@ export const make = Effect.gen(function* () {
             };
             const readLastRecord = () => {
               const record = remaining + decoder.decode();
-              return record.length === 0 || !reserveRecord() ? null : extractCwd(record.trim());
+              return record.length === 0 || !reserveRecord()
+                ? null
+                : extractSessionMetadata(record.trim());
             };
 
             while (bytesRead < maxBytes) {
@@ -692,8 +726,8 @@ export const make = Effect.gen(function* () {
 
               for (const line of lines) {
                 if (!reserveRecord()) return null;
-                const cwd = extractCwd(line.trim());
-                if (cwd !== null) return cwd;
+                const metadata = extractSessionMetadata(line.trim());
+                if (metadata !== null) return metadata;
               }
             }
 
@@ -887,6 +921,7 @@ export const make = Effect.gen(function* () {
     source: AgentSessionSource,
     transcripts: ReadonlyArray<TranscriptCandidate>,
     budget: MetadataReadBudget,
+    codexOwnerByAccountId: ReadonlyMap<string, ProviderInstanceId>,
   ) {
     const byOwnerAndCwd = new Map<
       string,
@@ -899,17 +934,21 @@ export const make = Effect.gen(function* () {
     >();
 
     for (const transcript of transcripts) {
-      const cwd = yield* readCwd(transcript, budget);
-      if (cwd === null) continue;
-      const key = `${transcript.providerInstanceId}\0${cwd}`;
+      const metadata = yield* readSessionMetadata(transcript, budget);
+      if (metadata === null) continue;
+      const providerInstanceId =
+        source === "codex" && metadata.creatorAccountId !== null
+          ? (codexOwnerByAccountId.get(metadata.creatorAccountId) ?? transcript.providerInstanceId)
+          : transcript.providerInstanceId;
+      const key = `${providerInstanceId}\0${metadata.cwd}`;
       const existing = byOwnerAndCwd.get(key);
       if (existing) {
         existing.lastActiveAtMs = Math.max(existing.lastActiveAtMs, transcript.mtimeMs);
         existing.transcripts.push(transcript);
       } else {
         byOwnerAndCwd.set(key, {
-          cwd,
-          providerInstanceId: transcript.providerInstanceId,
+          cwd: metadata.cwd,
+          providerInstanceId,
           lastActiveAtMs: transcript.mtimeMs,
           transcripts: [transcript],
         });
@@ -935,6 +974,7 @@ export const make = Effect.gen(function* () {
     let truncated = false;
 
     for (const source of ["claudeAgent", "codex"] as const) {
+      const codexOwnerByAccountId = new Map<string, ProviderInstanceId>();
       const instances: Array<{
         readonly instanceId: ProviderInstanceId;
         readonly config: ProviderInstanceConfig;
@@ -992,6 +1032,12 @@ export const make = Effect.gen(function* () {
             Effect.provideService(Path.Path, path),
           );
           homePath = layout.sharedHomePath;
+          const accountId = yield* readCodexAccountId(
+            layout.effectiveHomePath ?? layout.sharedHomePath,
+          );
+          if (accountId !== null && !codexOwnerByAccountId.has(accountId)) {
+            codexOwnerByAccountId.set(accountId, instanceId);
+          }
         }
 
         const homeKey = `${source}\0${yield* directoryIdentity(homePath)}`;
@@ -1033,7 +1079,14 @@ export const make = Effect.gen(function* () {
         recordsRemaining: MAX_METADATA_RECORDS_PER_SOURCE,
         truncated: false,
       };
-      raw.push(...(yield* groupTranscriptsByCwd(source, selectedTranscripts, metadataBudget)));
+      raw.push(
+        ...(yield* groupTranscriptsByCwd(
+          source,
+          selectedTranscripts,
+          metadataBudget,
+          codexOwnerByAccountId,
+        )),
+      );
       truncated ||= metadataBudget.truncated;
     }
 

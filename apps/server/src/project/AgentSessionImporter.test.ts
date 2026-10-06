@@ -8,6 +8,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
   type OrchestrationCommand,
   type OrchestrationProjectShell,
   type OrchestrationThread,
@@ -438,6 +439,162 @@ it.layer(NodeServices.layer)("AgentSessionImporter", (it) => {
       }),
     );
 
+    it.effect("appends only a new Codex tail while preserving a stopped Mom binding", () =>
+      Effect.gen(function* () {
+        const sourceThread: AgentSessionScanner.AgentSessionThread = {
+          ...makeThread("codex"),
+          providerSessionId: "codex-roundtrip-session",
+          messages: [
+            {
+              role: "user",
+              text: "A prompt",
+              createdAt: "2026-08-24T10:00:00.000Z",
+              providerTurnId: "turn-a",
+            },
+            {
+              role: "assistant",
+              text: "A",
+              createdAt: "2026-08-24T10:00:10.000Z",
+              providerTurnId: "turn-a",
+            },
+            {
+              role: "user",
+              text: "B prompt",
+              createdAt: "2026-08-24T10:01:00.000Z",
+              providerTurnId: "turn-b",
+            },
+            {
+              role: "assistant",
+              text: "B",
+              createdAt: "2026-08-24T10:01:10.000Z",
+              providerTurnId: "turn-b",
+            },
+            {
+              role: "user",
+              text: "C prompt",
+              createdAt: "2026-08-24T10:02:00.000Z",
+              providerTurnId: "turn-c",
+            },
+            {
+              role: "assistant",
+              text: "C",
+              createdAt: "2026-08-24T10:02:10.000Z",
+              providerTurnId: "turn-c",
+            },
+          ],
+        };
+        const threadId = ThreadId.make("import:codex:codex-roundtrip-session");
+        const base = makeProjectedThread({ source: "codex", imported: true });
+        const existingThread: OrchestrationThread = {
+          ...base,
+          id: threadId,
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex_mom"),
+            model: "gpt-6.1-sol",
+          },
+          messages: [
+            {
+              id: MessageId.make(String(threadId) + ":000000"),
+              role: "user",
+              text: "A prompt",
+              turnId: TurnId.make("turn-a"),
+              streaming: false,
+              createdAt: "2026-08-24T10:00:00.000Z",
+              updatedAt: "2026-08-24T10:00:00.000Z",
+            },
+            {
+              id: MessageId.make(String(threadId) + ":000001"),
+              role: "assistant",
+              text: "A",
+              turnId: TurnId.make("turn-a"),
+              streaming: false,
+              createdAt: "2026-08-24T10:00:10.000Z",
+              updatedAt: "2026-08-24T10:00:10.000Z",
+            },
+            {
+              id: MessageId.make("t3-b-user"),
+              role: "user",
+              text: "B prompt",
+              turnId: TurnId.make("turn-b"),
+              streaming: false,
+              createdAt: "2026-08-24T10:01:00.000Z",
+              updatedAt: "2026-08-24T10:01:00.000Z",
+            },
+            {
+              id: MessageId.make("t3-b-assistant"),
+              role: "assistant",
+              text: "B",
+              turnId: TurnId.make("turn-b"),
+              streaming: false,
+              createdAt: "2026-08-24T10:01:10.000Z",
+              updatedAt: "2026-08-24T10:01:10.000Z",
+            },
+          ],
+        };
+        const binding: ProviderSessionDirectory.ProviderRuntimeBinding = {
+          threadId,
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: ProviderInstanceId.make("codex_mom"),
+          status: "stopped",
+          resumeCursor: { threadId: sourceThread.providerSessionId },
+        };
+        const commands: Array<OrchestrationCommand> = [];
+        const engine = OrchestrationEngine.OrchestrationEngineService.of({
+          dispatch: (command) => Effect.sync(() => ({ sequence: commands.push(command) })),
+          readEvents: () => Stream.empty,
+          readThreadEvents: () => Stream.empty,
+          getThreadReplayStats: () => Effect.die("unused"),
+          streamDomainEvents: Stream.empty,
+          subscribeDomainEvents: Effect.succeed(Stream.empty),
+          latestSequence: Effect.succeed(0),
+        });
+        const recorded = vi.fn(() => Effect.void);
+        const directory = ProviderSessionDirectory.ProviderSessionDirectory.of({
+          upsert: () => Effect.die("must not replace the Mom binding"),
+          getProvider: () => Effect.die("unused"),
+          recordImportedTranscript: recorded,
+          getBinding: () => Effect.succeed(Option.some(binding)),
+          listThreadIds: () => Effect.die("unused"),
+          listBindings: () => Effect.die("unused"),
+        });
+        const scanner = AgentSessionScanner.AgentSessionScanner.of({
+          scan: Effect.die("unused"),
+          recentThreads: () => Stream.succeed(makeThreadOutcome(sourceThread)),
+        });
+
+        expect(
+          yield* runImport({
+            scanner,
+            engine,
+            directory,
+            snapshots: makeSnapshotsLayer({
+              project: makeProject(),
+              getThread: () => Option.some(existingThread),
+            }),
+          }),
+        ).toEqual({ importedCount: 1, skippedCount: 0 });
+        expect(commands).toHaveLength(1);
+        expect(commands[0]).toMatchObject({
+          type: "thread.history.append",
+          threadId,
+          messages: [
+            {
+              messageId: MessageId.make(String(threadId) + ":000004"),
+              role: "user",
+              text: "C prompt",
+              turnId: TurnId.make("turn-c"),
+            },
+            {
+              messageId: MessageId.make(String(threadId) + ":000005"),
+              role: "assistant",
+              text: "C",
+              turnId: TurnId.make("turn-c"),
+            },
+          ],
+        });
+        expect(recorded).toHaveBeenCalledTimes(1);
+      }),
+    );
     it.effect("does not replace completed history or an active binding on retry", () =>
       Effect.gen(function* () {
         const scanner = AgentSessionScanner.AgentSessionScanner.of({

@@ -97,6 +97,87 @@ function hasImportBlockingActivity(
   );
 }
 
+type ImportedHistoryAppendMessage = {
+  readonly messageId: MessageId;
+  readonly role: "user" | "assistant";
+  readonly text: string;
+  readonly turnId: TurnId;
+  readonly createdAt: string;
+};
+
+function codexHistoryAppendSuffix(
+  threadId: ThreadId,
+  existingThread: OrchestrationThread,
+  sourceThread: AgentSessionScanner.AgentSessionThread,
+): ReadonlyArray<ImportedHistoryAppendMessage> | null {
+  if (sourceThread.source !== "codex") return [];
+
+  const consumedExisting = new Set<number>();
+  let sawMissing = false;
+  const suffix: Array<ImportedHistoryAppendMessage> = [];
+
+  for (const [index, sourceMessage] of sourceThread.messages.entries()) {
+    const importedMessageId = MessageId.make(
+      String(threadId) + ":" + String(index).padStart(6, "0"),
+    );
+    const exactImportedIndex = existingThread.messages.findIndex(
+      (message, existingIndex) =>
+        !consumedExisting.has(existingIndex) &&
+        message.id === importedMessageId &&
+        message.role === sourceMessage.role &&
+        message.text === sourceMessage.text,
+    );
+    const providerTurnIndex =
+      exactImportedIndex >= 0 || sourceMessage.providerTurnId === undefined
+        ? -1
+        : existingThread.messages.findIndex(
+            (message, existingIndex) =>
+              !consumedExisting.has(existingIndex) &&
+              message.turnId === sourceMessage.providerTurnId &&
+              message.role === sourceMessage.role &&
+              message.text === sourceMessage.text,
+          );
+    const matchedIndex = exactImportedIndex >= 0 ? exactImportedIndex : providerTurnIndex;
+
+    if (matchedIndex >= 0) {
+      if (sawMissing) return null;
+      consumedExisting.add(matchedIndex);
+      continue;
+    }
+
+    if (existingThread.messages.some((message) => message.id === importedMessageId)) {
+      return null;
+    }
+    if (sourceMessage.providerTurnId === undefined) {
+      return [];
+    }
+
+    sawMissing = true;
+    suffix.push({
+      messageId: importedMessageId,
+      role: sourceMessage.role,
+      text: sourceMessage.text,
+      turnId: TurnId.make(sourceMessage.providerTurnId),
+      createdAt: sourceMessage.createdAt,
+    });
+  }
+
+  return suffix;
+}
+
+function bindingResumesCodexSession(
+  binding: ProviderSessionDirectory.ProviderRuntimeBinding,
+  providerSessionId: string,
+): boolean {
+  return (
+    binding.provider === "codex" &&
+    binding.status === "stopped" &&
+    typeof binding.resumeCursor === "object" &&
+    binding.resumeCursor !== null &&
+    "threadId" in binding.resumeCursor &&
+    binding.resumeCursor.threadId === providerSessionId
+  );
+}
 /** Import recent transcript text and persist the cursor needed to resume its provider session. */
 export const importRecentAgentThreads = Effect.fn("importRecentAgentThreads")(function* (
   input: AgentSessionImportInput,
@@ -200,6 +281,23 @@ export const importRecentAgentThreads = Effect.fn("importRecentAgentThreads")(fu
           importedHistoryPresent &&
           Option.isSome(existingBinding)
         ) {
+          if (thread.source === "codex") {
+            const suffix = codexHistoryAppendSuffix(threadId, existingThread.value, thread);
+            if (suffix === null) {
+              return yield* new AgentSessionThreadModifiedError({ threadId });
+            }
+            if (suffix.length > 0) {
+              if (!bindingResumesCodexSession(existingBinding.value, thread.providerSessionId)) {
+                return yield* new AgentSessionThreadModifiedError({ threadId });
+              }
+              yield* engine.dispatch({
+                type: "thread.history.append",
+                commandId: CommandId.make(yield* crypto.randomUUIDv4),
+                threadId,
+                messages: suffix,
+              });
+            }
+          }
           yield* directory.recordImportedTranscript({ threadId, source: outcome.source });
           return true;
         }

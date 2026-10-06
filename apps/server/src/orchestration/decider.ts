@@ -1405,6 +1405,84 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.history.append": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (
+        thread.deletedAt !== null ||
+        thread.archivedAt !== null ||
+        thread.session !== null ||
+        hasOpenBlockingRequest(thread)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' must be inactive before native history can be appended.`,
+        });
+      }
+
+      const existingMessageIds = new Set(thread.messages.map((message) => message.id));
+      const latestExistingCreatedAt = thread.messages.reduce<string | null>(
+        (latest, message) =>
+          latest === null || compareDateTimeStrings(message.createdAt, latest) > 0
+            ? message.createdAt
+            : latest,
+        null,
+      );
+      let previousCreatedAt = latestExistingCreatedAt;
+      const events: Array<PlannedOrchestrationEvent> = [];
+      for (const message of command.messages) {
+        if (!isImportedAgentSessionMessageId(message.messageId)) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Message id '${message.messageId}' must use the imported-session namespace.`,
+          });
+        }
+        if (existingMessageIds.has(message.messageId)) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: `Message id '${message.messageId}' already exists.`,
+          });
+        }
+        if (
+          previousCreatedAt !== null &&
+          compareDateTimeStrings(message.createdAt, previousCreatedAt) < 0
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail: "Native history appends must be a chronological suffix.",
+          });
+        }
+        previousCreatedAt = message.createdAt;
+        events.push({
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: message.createdAt,
+            commandId: command.commandId,
+            metadata: {
+              historyImport: true,
+              providerTurnId: message.turnId,
+            },
+          })),
+          type: "thread.message-sent",
+          payload: {
+            threadId: command.threadId,
+            messageId: message.messageId,
+            role: message.role,
+            text: message.text,
+            turnId: message.turnId,
+            streaming: false,
+            createdAt: message.createdAt,
+            updatedAt: message.createdAt,
+          },
+        });
+      }
+      return events;
+    }
+
     case "thread.history.import": {
       const thread = yield* requireThread({
         readModel,

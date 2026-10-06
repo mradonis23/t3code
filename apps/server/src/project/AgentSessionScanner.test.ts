@@ -2351,6 +2351,66 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
       }),
     );
 
+    it.effect("uses the authenticated account owner for a shared Codex session home", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
+        yield* TestClock.setTime(nowMs);
+        const claudeHomePath = yield* makeTempDir("t3code-claude-home-");
+        const codexHomePath = yield* makeTempDir("t3code-codex-home-");
+        const sharedHome = yield* makeTempDir("t3code-codex-shared-");
+        const baseShadowHome = yield* makeTempDir("t3code-codex-base-shadow-");
+        const momShadowHome = yield* makeTempDir("t3code-codex-mom-shadow-");
+        const workspace = yield* makeTempDir("t3code-workspace-");
+
+        yield* fileSystem.writeFileString(
+          path.join(baseShadowHome, "auth.json"),
+          '{"tokens":{"account_id":"account-base"}}',
+        );
+        yield* fileSystem.writeFileString(
+          path.join(momShadowHome, "auth.json"),
+          '{"tokens":{"account_id":"account-mom"}}',
+        );
+        yield* writeTranscript({
+          filePath: path.join(sharedHome, "sessions", "2026", "08", "24", "rollout-mom.jsonl"),
+          contents: [
+            encodeTranscriptRecord({
+              type: "session_meta",
+              payload: {
+                id: "mom-session",
+                cwd: workspace,
+                creator_account_id: "account-mom",
+              },
+            }),
+            encodeTranscriptRecord({
+              type: "event_msg",
+              payload: { type: "user_message", message: "Resume with Mom" },
+            }),
+          ].join("\n"),
+          mtimeMs: nowMs,
+        });
+
+        const threads = yield* runRecentThreads({
+          claudeHomePath,
+          codexHomePath,
+          workspaceRoot: workspace,
+          providerInstances: {
+            [ProviderInstanceId.make("codex")]: {
+              driver: ProviderDriverKind.make("codex"),
+              config: { homePath: sharedHome, shadowHomePath: baseShadowHome },
+            },
+            [ProviderInstanceId.make("codex_mom")]: {
+              driver: ProviderDriverKind.make("codex"),
+              config: { homePath: sharedHome, shadowHomePath: momShadowHome },
+            },
+          },
+        });
+
+        expect(threads.map((thread) => thread.providerInstanceId)).toEqual(["codex_mom"]);
+      }),
+    );
+
     it.effect("uses configured order when custom instances share a session home", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;

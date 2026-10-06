@@ -12,6 +12,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as TestClock from "effect/testing/TestClock";
 
+import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import { decideOrchestrationCommand } from "./decider.ts";
 import { createEmptyReadModel, projectEvent } from "./projector.ts";
 
@@ -184,6 +185,139 @@ it.layer(NodeServices.layer)("thread history import", (it) => {
         "Fix the bug",
         "Fixed",
       ]);
+    }),
+  );
+
+  it.effect("appends only imported native history after existing T3 activity", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("import:codex:roundtrip-session");
+      const createdAt = "2026-08-24T10:00:00.000Z";
+      const withThread = yield* projectEvent(createEmptyReadModel(createdAt), {
+        sequence: 1,
+        eventId: EventId.make("event-roundtrip-thread-created"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        type: "thread.created",
+        occurredAt: createdAt,
+        commandId: CommandId.make("command-roundtrip-thread-created"),
+        causationEventId: null,
+        correlationId: CommandId.make("command-roundtrip-thread-created"),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId: ProjectId.make("project-1"),
+          title: "Roundtrip",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex_mom"),
+            model: "gpt-6.1-sol",
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt,
+          updatedAt: createdAt,
+        },
+      });
+      const withImported = yield* projectEvent(withThread, {
+        sequence: 2,
+        eventId: EventId.make("event-roundtrip-imported-a"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        type: "thread.message-sent",
+        occurredAt: createdAt,
+        commandId: CommandId.make("command-roundtrip-imported-a"),
+        causationEventId: null,
+        correlationId: CommandId.make("command-roundtrip-imported-a"),
+        metadata: { historyImport: true, providerTurnId: TurnId.make("turn-a") },
+        payload: {
+          threadId,
+          messageId: MessageId.make(String(threadId) + ":000000"),
+          role: "user",
+          text: "A",
+          turnId: TurnId.make("turn-a"),
+          streaming: false,
+          createdAt,
+          updatedAt: createdAt,
+        },
+      });
+      const readModel = yield* projectEvent(withImported, {
+        sequence: 3,
+        eventId: EventId.make("event-roundtrip-t3-b"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        type: "thread.message-sent",
+        occurredAt: "2026-08-24T10:01:00.000Z",
+        commandId: CommandId.make("command-roundtrip-t3-b"),
+        causationEventId: null,
+        correlationId: CommandId.make("command-roundtrip-t3-b"),
+        metadata: { providerTurnId: TurnId.make("turn-b") },
+        payload: {
+          threadId,
+          messageId: MessageId.make("t3-b"),
+          role: "assistant",
+          text: "B",
+          turnId: TurnId.make("turn-b"),
+          streaming: false,
+          createdAt: "2026-08-24T10:01:00.000Z",
+          updatedAt: "2026-08-24T10:01:00.000Z",
+        },
+      });
+      const events = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.history.append",
+          commandId: CommandId.make("command-roundtrip-append-c"),
+          threadId,
+          messages: [
+            {
+              messageId: MessageId.make(String(threadId) + ":000002"),
+              role: "user",
+              text: "C prompt",
+              turnId: TurnId.make("turn-c"),
+              createdAt: "2026-08-24T10:02:00.000Z",
+            },
+            {
+              messageId: MessageId.make(String(threadId) + ":000003"),
+              role: "assistant",
+              text: "C",
+              turnId: TurnId.make("turn-c"),
+              createdAt: "2026-08-24T10:03:00.000Z",
+            },
+          ],
+        },
+        readModel,
+      });
+      expect(events).toMatchObject([
+        {
+          type: "thread.message-sent",
+          metadata: { historyImport: true, providerTurnId: TurnId.make("turn-c") },
+          payload: { role: "user", text: "C prompt", turnId: TurnId.make("turn-c") },
+        },
+        {
+          type: "thread.message-sent",
+          metadata: { historyImport: true, providerTurnId: TurnId.make("turn-c") },
+          payload: { role: "assistant", text: "C", turnId: TurnId.make("turn-c") },
+        },
+      ]);
+      expect(Array.isArray(events) ? events : [events]).toHaveLength(2);
+      const invalid = decideOrchestrationCommand({
+        command: {
+          type: "thread.history.append",
+          commandId: CommandId.make("command-roundtrip-invalid"),
+          threadId,
+          messages: [
+            {
+              messageId: MessageId.make("not-imported"),
+              role: "assistant",
+              text: "invalid",
+              turnId: TurnId.make("turn-d"),
+              createdAt: "2026-08-24T10:04:00.000Z",
+            },
+          ],
+        },
+        readModel,
+      });
+      expect(yield* Effect.flip(invalid)).toBeInstanceOf(OrchestrationCommandInvariantError);
     }),
   );
 
