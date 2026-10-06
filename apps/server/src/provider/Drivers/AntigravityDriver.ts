@@ -34,6 +34,10 @@ import {
   type AntigravityAuthConfig,
 } from "../antigravityAuthSupport.ts";
 import {
+  antigravityScratchBlockReason,
+  inspectWindowsAntigravityScratchPressure,
+} from "../antigravityScratchGuard.ts";
+import {
   makeAntigravityAcpRuntime,
   type AntigravityAcpRuntimeInput,
 } from "../acp/AntigravityAcpSupport.ts";
@@ -200,6 +204,31 @@ export const AntigravityDriver: ProviderDriver<AntigravitySettings, AntigravityD
           Effect.provideService(Path.Path, path),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         );
+        if (hostPlatform === "win32") {
+          const pressure = yield* Effect.tryPromise(() =>
+            inspectWindowsAntigravityScratchPressure(),
+          ).pipe(
+            Effect.timeout("3 seconds"),
+            Effect.mapError(
+              (cause) =>
+                new ProviderSetupError({
+                  instanceId,
+                  operation: "start",
+                  detail:
+                    "Could not verify Antigravity runtime-scratch capacity. T3 blocked the launch to protect disk space.",
+                  cause,
+                }),
+            ),
+          );
+          const blockReason = antigravityScratchBlockReason(pressure);
+          if (blockReason !== null) {
+            return yield* new ProviderSetupError({
+              instanceId,
+              operation: "start",
+              detail: `Antigravity launch blocked to protect disk space: ${blockReason}. Open Settings > Diagnostics before retrying.`,
+            });
+          }
+        }
         const scratchDirectory =
           hostPlatform === "win32"
             ? resolveWindowsAntigravityScratchDirectory(

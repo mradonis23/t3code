@@ -138,5 +138,13 @@ If Google reports `SUBSCRIPTION_REQUIRED`, an account restriction, or a usage li
 follow the provider's message and any retry time. See [Google's account plans][plans]
 for eligibility.
 
+On Windows, T3 Code isolates each Antigravity launch in a T3-owned runtime-scratch
+directory and removes it when the helper stops. Before starting another helper, T3
+also checks free disk space and the number of leftover owned launch directories. If
+that safety check fails, the new launch is blocked instead of allowing repeated
+temporary extraction to consume the drive. Open **Settings > Diagnostics** and run
+**Run T3 diagnostics** to inspect disk and runtime-scratch status before retrying.
+T3 does not delete unrelated temporary directories as part of this protection.
+
 [registry]: https://github.com/agentclientprotocol/registry/blob/main/antigravity-acp/agent.json
 [plans]: https://antigravity.google/docs/plans
