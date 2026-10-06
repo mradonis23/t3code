@@ -896,7 +896,7 @@ it.layer(integrationLayer)("AgentSessionImporter integration", (it) => {
             {
               messageId: MessageId.make(`${legacy.threadId}:000000`),
               role: "user",
-              text: "Legacy imported history",
+              text: `Prompt ${legacy.providerSessionId}`,
               createdAt: "2026-08-24T10:00:00.000Z",
             },
           ],
@@ -999,7 +999,7 @@ it.layer(integrationLayer)("AgentSessionImporter integration", (it) => {
           Option.getOrThrow(yield* snapshots.getThreadDetailById(legacy.threadId)).messages.map(
             (message) => message.text,
           ),
-        ).toEqual(["Legacy imported history"]);
+        ).toEqual([`Prompt ${legacy.providerSessionId}`]);
         expect(
           Option.getOrThrow(yield* directory.getBinding(legacy.threadId)).resumeCursor,
         ).toEqual({

@@ -43,26 +43,14 @@ describe("resolveHistoricalBranchBoundaries", () => {
         {
           id: TurnId.make("turn-unique"),
           items: [{ type: "agentMessage", text: "Unique answer" }],
-          startedAt: null,
-          completedAt: null,
-          status: "completed",
-          error: null,
         },
         {
           id: TurnId.make("turn-repeat-a"),
           items: [{ type: "agentMessage", text: "Repeated answer" }],
-          startedAt: null,
-          completedAt: null,
-          status: "completed",
-          error: null,
         },
         {
           id: TurnId.make("turn-repeat-b"),
           items: [{ type: "agentMessage", text: "Repeated answer" }],
-          startedAt: null,
-          completedAt: null,
-          status: "completed",
-          error: null,
         },
       ],
     } satisfies ProviderThreadSnapshot;
