@@ -1389,6 +1389,108 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
       }),
     );
 
+    it.effect("ignores Codex environment-context response items in imported history", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
+        yield* TestClock.setTime(nowMs);
+        const claudeHomePath = yield* makeTempDir("t3code-claude-home-");
+        const codexHomePath = yield* makeTempDir("t3code-codex-home-");
+        const workspace = yield* makeTempDir("t3code-workspace-");
+        const turnId = "turn-native-resume";
+
+        yield* writeTranscript({
+          filePath: path.join(
+            codexHomePath,
+            "sessions",
+            "2026",
+            "08",
+            "24",
+            "rollout-codex-environment-context.jsonl",
+          ),
+          contents: [
+            encodeTranscriptRecord({
+              type: "session_meta",
+              payload: { id: "codex-environment-context", cwd: workspace },
+            }),
+            encodeTranscriptRecord({
+              type: "event_msg",
+              timestamp: "2026-08-24T10:00:00.000Z",
+              payload: { type: "user_message", message: "Baseline prompt" },
+            }),
+            encodeTranscriptRecord({
+              type: "response_item",
+              timestamp: "2026-08-24T10:00:10.000Z",
+              payload: {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "Baseline answer" }],
+              },
+            }),
+            encodeTranscriptRecord({
+              type: "response_item",
+              timestamp: "2026-08-24T10:01:00.000Z",
+              payload: {
+                type: "message",
+                role: "user",
+                content: [
+                  {
+                    type: "input_text",
+                    text: "<environment_context>\n  <cwd>C:\\other-workspace</cwd>\n</environment_context>",
+                  },
+                ],
+                internal_chat_message_metadata_passthrough: {
+                  turn_id: turnId,
+                  content_item_kinds: ["environments.environment_context"],
+                },
+              },
+            }),
+            encodeTranscriptRecord({
+              type: "response_item",
+              timestamp: "2026-08-24T10:01:01.000Z",
+              payload: {
+                type: "message",
+                role: "user",
+                content: [{ type: "input_text", text: "Native follow-up" }],
+                internal_chat_message_metadata_passthrough: {
+                  turn_id: turnId,
+                  content_item_kinds: ["user.text"],
+                },
+              },
+            }),
+            encodeTranscriptRecord({
+              type: "response_item",
+              timestamp: "2026-08-24T10:01:10.000Z",
+              payload: {
+                type: "message",
+                role: "assistant",
+                content: [{ type: "output_text", text: "Native answer" }],
+                internal_chat_message_metadata_passthrough: {
+                  turn_id: turnId,
+                  content_item_kinds: ["unknown"],
+                },
+              },
+            }),
+          ].join("\n"),
+          mtimeMs: nowMs - 60 * 60 * 1000,
+        });
+
+        const threads = yield* runRecentThreads({
+          claudeHomePath,
+          codexHomePath,
+          workspaceRoot: workspace,
+        });
+
+        expect(threads).toHaveLength(1);
+        expect(threads[0]?.messages.map((message) => message.text)).toEqual([
+          "Baseline prompt",
+          "Baseline answer",
+          "Native follow-up",
+          "Native answer",
+        ]);
+      }),
+    );
+
     it.effect("imports history recorded with a case alias", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;

@@ -137,7 +137,51 @@ function codexHistoryAppendSuffix(
               message.role === sourceMessage.role &&
               message.text === sourceMessage.text,
           );
-    const matchedIndex = exactImportedIndex >= 0 ? exactImportedIndex : providerTurnIndex;
+    const pairedLocalUserIndex =
+      exactImportedIndex >= 0 ||
+      providerTurnIndex >= 0 ||
+      sourceMessage.role !== "user" ||
+      sourceMessage.providerTurnId === undefined
+        ? -1
+        : (() => {
+            const nextSource = sourceThread.messages[index + 1];
+            if (
+              nextSource?.role !== "assistant" ||
+              nextSource.providerTurnId !== sourceMessage.providerTurnId
+            ) {
+              return -1;
+            }
+
+            const candidates: Array<number> = [];
+            for (const [existingIndex, message] of existingThread.messages.entries()) {
+              if (
+                consumedExisting.has(existingIndex) ||
+                message.role !== "user" ||
+                message.text !== sourceMessage.text ||
+                message.turnId !== null
+              ) {
+                continue;
+              }
+              const nextExisting = existingThread.messages[existingIndex + 1];
+              if (
+                nextExisting === undefined ||
+                consumedExisting.has(existingIndex + 1) ||
+                nextExisting.role !== "assistant" ||
+                nextExisting.turnId !== sourceMessage.providerTurnId ||
+                nextExisting.text !== nextSource.text
+              ) {
+                continue;
+              }
+              candidates.push(existingIndex);
+            }
+            return candidates.length === 1 ? (candidates[0] ?? -1) : -1;
+          })();
+    const matchedIndex =
+      exactImportedIndex >= 0
+        ? exactImportedIndex
+        : providerTurnIndex >= 0
+          ? providerTurnIndex
+          : pairedLocalUserIndex;
 
     if (matchedIndex >= 0) {
       if (sawMissing) return null;

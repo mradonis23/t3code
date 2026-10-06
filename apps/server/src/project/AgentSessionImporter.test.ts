@@ -515,7 +515,7 @@ it.layer(NodeServices.layer)("AgentSessionImporter", (it) => {
               id: MessageId.make("t3-b-user"),
               role: "user",
               text: "B prompt",
-              turnId: TurnId.make("turn-b"),
+              turnId: null,
               streaming: false,
               createdAt: "2026-08-24T10:01:00.000Z",
               updatedAt: "2026-08-24T10:01:00.000Z",

@@ -90,6 +90,7 @@ const TranscriptMessage = Schema.Struct({
 
 const CodexTurnMetadata = Schema.Struct({
   turn_id: Schema.optional(Schema.Union([Schema.String, Schema.Null])),
+  content_item_kinds: Schema.optional(Schema.Array(Schema.String)),
 });
 
 const TranscriptRecord = Schema.Struct({
@@ -242,6 +243,14 @@ function normalizeTimestamp(value: string | undefined, fallback: string): string
   return Option.isSome(parsed) ? DateTime.formatIso(parsed.value) : fallback;
 }
 
+function isCodexEnvironmentContext(metadata: unknown): boolean {
+  const decoded = decodeCodexTurnMetadata(metadata);
+  return (
+    Option.isSome(decoded) &&
+    decoded.value.content_item_kinds?.includes("environments.environment_context") === true
+  );
+}
+
 function codexTurnId(metadata: unknown): string | null {
   const decoded = decodeCodexTurnMetadata(metadata);
   if (
@@ -334,6 +343,9 @@ export function parseAgentSessionTranscript(
         record.payload?.type === "message" &&
         record.payload.role === "user"
       ) {
+        if (isCodexEnvironmentContext(record.payload.internal_chat_message_metadata_passthrough)) {
+          continue;
+        }
         const turnId = codexTurnId(record.payload.internal_chat_message_metadata_passthrough);
         const text = extractText(record.payload.content);
         if (turnId !== null && text.length > 0) {
@@ -449,6 +461,12 @@ export function parseAgentSessionTranscript(
       continue;
     }
 
+    if (
+      record.payload.role === "user" &&
+      isCodexEnvironmentContext(record.payload.internal_chat_message_metadata_passthrough)
+    ) {
+      continue;
+    }
     const extractedText = extractText(record.payload.content);
     if (extractedText.length === 0) continue;
     if (record.payload.role === "user") {
