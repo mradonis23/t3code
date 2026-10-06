@@ -167,6 +167,7 @@ describe("ProviderCommandReactor", () => {
 
   async function createHarness(input?: {
     readonly baseDir?: string;
+    readonly recoveryProviders?: ReadonlyArray<import("@t3tools/contracts").ServerProvider>;
     readonly threadModelSelection?: ModelSelection;
     readonly sessionModelSwitch?: "unsupported" | "in-session";
     readonly requiresNewThreadForModelChange?: boolean;
@@ -340,7 +341,7 @@ describe("ProviderCommandReactor", () => {
         }),
       ),
     );
-    const providerSnapshots = [
+    const providerSnapshots = input?.recoveryProviders ?? [
       {
         instanceId: modelSelection.instanceId,
         ...(input?.requiresNewThreadForModelChange === true
@@ -828,6 +829,138 @@ describe("ProviderCommandReactor", () => {
         }),
       );
     }),
+  );
+
+  it.each(["error", "running"] as const)(
+    "approved account recovery respects the native writer in %s state",
+    async (runtimeStatus) => {
+      const checkedAt = "2026-01-01T00:00:00.000Z";
+      const provider = (id: string): import("@t3tools/contracts").ServerProvider => ({
+        instanceId: ProviderInstanceId.make(id),
+        driver: ProviderDriverKind.make("codex"),
+        enabled: true,
+        installed: true,
+        version: null,
+        status: "ready",
+        auth: { status: "authenticated" },
+        checkedAt,
+        availability: "available",
+        models: [],
+        slashCommands: [],
+        skills: [],
+        usageLimits: {
+          checkedAt,
+          windows: [{ id: "session", kind: "session", label: "Session", usedPercent: 0 }],
+        },
+      });
+      const harness = await createHarness({
+        recoveryProviders: [provider("codex"), provider("codex_mom")],
+      });
+      const processingStarted = await harness.runEffect(Deferred.make<void>());
+      harness.tryHandlePromptCommand.mockImplementationOnce(() =>
+        Deferred.succeed(processingStarted, undefined).pipe(Effect.as(false)),
+      );
+      const threadId = ThreadId.make("thread-1");
+      const nativeCursor = { threadId: "native-original", opaque: "native-continuity" };
+      harness.runtimeSessions.push({
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        status: runtimeStatus,
+        ...(runtimeStatus === "running" ? { activeTurnId: TurnId.make("still-running") } : {}),
+        threadId,
+        runtimeMode: "approval-required",
+        model: "gpt-5-codex",
+        cwd: "/tmp/provider-project",
+        resumeCursor: nativeCursor,
+        createdAt: checkedAt,
+        updatedAt: checkedAt,
+      });
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make("recovery-error"),
+          threadId,
+          session: {
+            threadId,
+            status: "error",
+            providerName: ProviderDriverKind.make("codex"),
+            providerInstanceId: ProviderInstanceId.make("codex"),
+            runtimeMode: "approval-required",
+            activeTurnId: null,
+            lastError: "Usage limit reached",
+            updatedAt: checkedAt,
+          },
+          createdAt: checkedAt,
+        }),
+      );
+      const offerId = EventId.make("recovery-offer");
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.activity.append",
+          commandId: CommandId.make("recovery-offered"),
+          threadId,
+          activity: {
+            id: offerId,
+            kind: "codex.account.failover.offered",
+            tone: "info",
+            summary: "Continue with Mom?",
+            payload: {
+              fromProviderInstanceId: ProviderInstanceId.make("codex"),
+              toProviderInstanceId: ProviderInstanceId.make("codex_mom"),
+              sourceMessageId: null,
+              reason: "Usage limit reached",
+            },
+            turnId: null,
+            createdAt: checkedAt,
+          },
+          createdAt: checkedAt,
+        }),
+      );
+      await harness.runEffect(
+        harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("recovery-approved"),
+          threadId,
+          accountRecoveryOfferId: offerId,
+          message: {
+            messageId: MessageId.make("recovery-message"),
+            role: "user",
+            text: "",
+            attachments: [],
+          },
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex_mom"),
+            model: "gpt-5-codex",
+          },
+          runtimeMode: "approval-required",
+          interactionMode: "default",
+          createdAt: "2026-01-01T00:00:01.000Z",
+        }),
+      );
+      await harness.runEffect(Deferred.await(processingStarted));
+      await harness.drain();
+      if (runtimeStatus === "running") {
+        expect(harness.startSession).not.toHaveBeenCalled();
+        expect(harness.sendTurn).not.toHaveBeenCalled();
+        expect(harness.stopSession).not.toHaveBeenCalled();
+        expect(
+          (await harness.readModel()).threads[0]?.activities.some(
+            (activity) => activity.kind === "provider.turn.start.failed",
+          ),
+        ).toBe(true);
+        return;
+      }
+      expect(harness.startSession).toHaveBeenCalledTimes(1);
+      expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+        providerInstanceId: "codex_mom",
+        resumeCursor: nativeCursor,
+      });
+      expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+      expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+        modelSelection: { instanceId: "codex_mom" },
+      });
+      expect((await harness.readModel()).threads[0]?.modelSelection.instanceId).toBe("codex_mom");
+    },
   );
 
   it("reacts to thread.turn.start by ensuring session and sending provider turn", async () => {
@@ -2734,6 +2867,10 @@ describe("ProviderCommandReactor", () => {
   it("restarts an existing Codex thread on a compatible requested instance", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
+    const firstTurnProcessing = await harness.runEffect(Deferred.make<void>());
+    harness.tryHandlePromptCommand.mockImplementationOnce(() =>
+      Deferred.succeed(firstTurnProcessing, undefined).pipe(Effect.as(false)),
+    );
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -2756,7 +2893,26 @@ describe("ProviderCommandReactor", () => {
       }),
     );
 
-    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await harness.runEffect(Deferred.await(firstTurnProcessing));
+    await harness.drain();
+    expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+    await harness.runEffect(
+      Effect.gen(function* () {
+        const current = (yield* Effect.promise(harness.readModel)).threads[0]!.session!;
+        yield* harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make("server:provider-session-set:compatible-switch-ready"),
+          threadId: current.threadId,
+          session: { ...current, status: "ready", activeTurnId: null },
+          createdAt: now,
+        });
+      }),
+    );
+
+    const nextTurnProcessing = await harness.runEffect(Deferred.make<void>());
+    harness.tryHandlePromptCommand.mockImplementationOnce(() =>
+      Deferred.succeed(nextTurnProcessing, undefined).pipe(Effect.as(false)),
+    );
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -2779,7 +2935,9 @@ describe("ProviderCommandReactor", () => {
       }),
     );
 
-    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    await harness.runEffect(Deferred.await(nextTurnProcessing));
+    await harness.drain();
+    expect(harness.sendTurn).toHaveBeenCalledTimes(2);
 
     expect(harness.startSession).toHaveBeenCalledTimes(2);
     expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
@@ -3135,6 +3293,10 @@ describe("ProviderCommandReactor", () => {
   it("rejects provider changes after a thread is already bound to a session provider", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";
+    const firstTurnProcessing = await harness.runEffect(Deferred.make<void>());
+    harness.tryHandlePromptCommand.mockImplementationOnce(() =>
+      Deferred.succeed(firstTurnProcessing, undefined).pipe(Effect.as(false)),
+    );
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -3153,8 +3315,26 @@ describe("ProviderCommandReactor", () => {
       }),
     );
 
-    await waitFor(() => harness.startSession.mock.calls.length === 1);
-    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await harness.runEffect(Deferred.await(firstTurnProcessing));
+    await harness.drain();
+    expect(harness.sendTurn).toHaveBeenCalledTimes(1);
+    await harness.runEffect(
+      Effect.gen(function* () {
+        const current = (yield* Effect.promise(harness.readModel)).threads[0]!.session!;
+        yield* harness.engine.dispatch({
+          type: "thread.session.set",
+          commandId: CommandId.make("server:provider-session-set:cross-driver-ready"),
+          threadId: current.threadId,
+          session: { ...current, status: "ready", activeTurnId: null },
+          createdAt: now,
+        });
+      }),
+    );
+
+    const nextTurnProcessing = await harness.runEffect(Deferred.make<void>());
+    harness.tryHandlePromptCommand.mockImplementationOnce(() =>
+      Deferred.succeed(nextTurnProcessing, undefined).pipe(Effect.as(false)),
+    );
 
     await Effect.runPromise(
       harness.engine.dispatch({
@@ -3177,14 +3357,8 @@ describe("ProviderCommandReactor", () => {
       }),
     );
 
-    await waitFor(async () => {
-      const readModel = await harness.readModel();
-      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
-      return (
-        thread?.activities.some((activity) => activity.kind === "provider.turn.start.failed") ??
-        false
-      );
-    });
+    await harness.runEffect(Deferred.await(nextTurnProcessing));
+    await harness.drain();
 
     expect(harness.startSession.mock.calls.length).toBe(1);
     expect(harness.sendTurn.mock.calls.length).toBe(1);

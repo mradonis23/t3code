@@ -10,6 +10,7 @@ export type SettingsPath =
   | "/settings/integrations"
   | "/settings/source-control"
   | "/settings/connections"
+  | "/settings/diagnostics"
   | "/settings/archived";
 
 export interface SettingsSearchItem {
@@ -56,6 +57,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/integrations": "Integrations",
   "/settings/source-control": "Source Control",
   "/settings/connections": "Connections",
+  "/settings/diagnostics": "Command Center",
   "/settings/archived": "Archive",
 };
 
@@ -162,7 +164,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "automatic-codex-account-failover",
-    title: "Automatic Codex account failover",
+    title: "Assisted Codex account recovery",
     to: "/settings/general",
     searchTerms: ["codex account usage limit quota continue switch dad mom nena"],
   },
@@ -299,9 +301,11 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "diagnostics",
-    title: "Diagnostics",
-    to: "/settings/general",
-    searchTerms: ["logs traces processes resource history failures spans cpu memory"],
+    title: "T3 Command Center",
+    to: "/settings/diagnostics",
+    searchTerms: [
+      "diagnostics status health logs traces processes resource history failures spans cpu memory disk backup native sessions queue desktop fold",
+    ],
   },
   {
     id: "legacy-plan-mode",

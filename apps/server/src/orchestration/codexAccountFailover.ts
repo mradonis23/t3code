@@ -69,10 +69,18 @@ export function selectCodexFailoverProvider(input: {
   readonly modelSelection: ModelSelection;
   readonly blockedInstanceIds?: ReadonlySet<string>;
 }): ServerProvider | null {
+  const current = input.providers.find(
+    (provider) => provider.instanceId === input.currentInstanceId,
+  );
   const candidates = input.providers
     .filter((provider) => provider.instanceId !== input.currentInstanceId)
     .filter((provider) => !input.blockedInstanceIds?.has(String(provider.instanceId)))
     .filter(providerHasUsableCodexCapacity)
+    .filter(
+      (provider) =>
+        !current?.continuation?.groupKey ||
+        provider.continuation?.groupKey === current.continuation.groupKey,
+    )
     .filter((provider) => modelIsSupported(provider, input.modelSelection))
     .map((provider) => ({ provider, ...capacityScore(provider) }))
     .sort(

@@ -1,3 +1,9 @@
+import {
+  accountSwitchBlocked,
+  availableAccountRecovery,
+  unavailableAccountRecoveryReason,
+  codexAccountLabel,
+} from "@t3tools/client-runtime/account-recovery";
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
 import {
@@ -2754,7 +2760,13 @@ export default function ChatView(props: ChatViewProps) {
         ? { label: "Mom's Codex", color: "#FF9F0A" }
         : activeProviderStatus.instanceId === "codex_nena"
           ? { label: "Nena's Codex", color: "#30D158" }
-          : { label: "Dad's Codex", color: "#0A84FF" }
+          : {
+              label: codexAccountLabel(
+                String(activeProviderStatus.instanceId),
+                activeProviderStatus.displayName,
+              ),
+              color: "#0A84FF",
+            }
       : null;
   const activeSessionLimit = activeProviderStatus?.usageLimits?.windows.find(
     (window) => window.label.toLowerCase() === "session",
@@ -3231,6 +3243,51 @@ export default function ChatView(props: ChatViewProps) {
     refresh: gitStatusQuery.refresh,
     resourceKey: `git-status:${activeThreadKey ?? ""}:${gitStatusCwd ?? ""}`,
   });
+  const recoveryOffer = activeThread ? availableAccountRecovery(activeThread) : null;
+  const [dismissedRecoveryOfferId, setDismissedRecoveryOfferId] = useState<string | null>(null);
+  const [acceptingRecovery, setAcceptingRecovery] = useState(false);
+  const visibleRecoveryOffer =
+    recoveryOffer?.id === dismissedRecoveryOfferId ? null : recoveryOffer;
+  const acceptAccountRecovery = async () => {
+    if (
+      !activeThread ||
+      !visibleRecoveryOffer ||
+      acceptingRecovery ||
+      activeEnvironmentConnectionPhase !== "connected"
+    )
+      return;
+    setAcceptingRecovery(true);
+    try {
+      const result = await startThreadTurn({
+        environmentId,
+        input: {
+          commandId: CommandId.make(`account-recovery:${randomHex(16)}`),
+          threadId: activeThread.id,
+          accountRecoveryOfferId: visibleRecoveryOffer.id,
+          message: { messageId: newMessageId(), role: "user", text: "", attachments: [] },
+          modelSelection: {
+            ...activeThread.modelSelection,
+            instanceId: visibleRecoveryOffer.toProviderInstanceId,
+          },
+          runtimeMode: activeThread.runtimeMode,
+          interactionMode: activeThread.interactionMode,
+          createdAt: new Date().toISOString(),
+        },
+      });
+      if (result._tag !== "Failure") {
+        setComposerDraftModelSelection(
+          scopeThreadRef(activeThread.environmentId, activeThread.id),
+          {
+            ...activeThread.modelSelection,
+            instanceId: visibleRecoveryOffer.toProviderInstanceId,
+          },
+          { explicit: true },
+        );
+      }
+    } finally {
+      setAcceptingRecovery(false);
+    }
+  };
   const checkpointContinuation = useMemo(
     () =>
       activeThread
@@ -7985,6 +8042,8 @@ export default function ChatView(props: ChatViewProps) {
       if (!activeThread) {
         return null;
       }
+      if (accountSwitchBlocked(activeThread, instanceId))
+        return "Stop the active turn before switching accounts.";
       const reason = getStartedThreadModelChangeBlockReason({
         providers: providerStatuses,
         hasStartedSession: activeThread.session !== null,
@@ -8000,6 +8059,14 @@ export default function ChatView(props: ChatViewProps) {
   const onProviderModelSelect = useCallback(
     (instanceId: ProviderInstanceId, model: string) => {
       if (!activeThread) return;
+      if (accountSwitchBlocked(activeThread, instanceId)) {
+        toastManager.add({
+          type: "warning",
+          title: "Stop the active turn before switching accounts",
+          description: "The current account is still writing to this thread.",
+        });
+        return;
+      }
       // Look up the configured instance so model normalization and custom
       // model lookup stay scoped to that exact instance. Unknown instance ids
       // are rejected by returning early; the server remains authoritative too.
@@ -8424,11 +8491,62 @@ export default function ChatView(props: ChatViewProps) {
                 onOpenProviderSetup={openProviderSetup}
               />
               <ThreadErrorBanner
-                error={visibleThreadError ?? checkpointContinuation?.reason ?? null}
+                error={
+                  visibleRecoveryOffer?.summary ??
+                  (activeThread ? unavailableAccountRecoveryReason(activeThread) : null) ??
+                  visibleThreadError ??
+                  checkpointContinuation?.reason ??
+                  null
+                }
+                {...(visibleRecoveryOffer
+                  ? {
+                      onAcceptAccount: () => void acceptAccountRecovery(),
+                      accountActionLabel: `Continue with ${codexAccountLabel(String(visibleRecoveryOffer.toProviderInstanceId))}`,
+                      accountActionDisabled:
+                        acceptingRecovery || activeEnvironmentConnectionPhase !== "connected",
+                    }
+                  : {})}
                 {...(checkpointContinuation
-                  ? { onContinue: () => void onContinueFromCheckpoint() }
+                  ? {
+                      onContinue: () => void onContinueFromCheckpoint(),
+                      onQueue: () => void queueTextPrompt(checkpointContinuation.prompt, "paused"),
+                      ...(!activeThreadBusy && activeProviderStatus?.driver === "codex"
+                        ? { onSwitchAccount: () => composerRef.current?.openModelPicker() }
+                        : {}),
+                      ...(checkpointContinuation.kind !== "usage-limit" &&
+                      !activeThreadBusy &&
+                      activeEnvironmentConnectionPhase === "connected" &&
+                      activeThread.messages.some((message) => message.role === "user")
+                        ? {
+                            onRetry: () => {
+                              const message = activeThread.messages.findLast(
+                                (entry) => entry.role === "user",
+                              );
+                              if (!message) return;
+                              void startThreadTurn({
+                                environmentId,
+                                input: {
+                                  commandId: CommandId.make(`retry:${randomHex(16)}`),
+                                  threadId: activeThread.id,
+                                  message: {
+                                    messageId: newMessageId(),
+                                    role: "user",
+                                    text: message.text,
+                                    attachments: message.attachments ?? [],
+                                  },
+                                  modelSelection: activeThread.modelSelection,
+                                  runtimeMode: activeThread.runtimeMode,
+                                  interactionMode: activeThread.interactionMode,
+                                  createdAt: new Date().toISOString(),
+                                },
+                              });
+                            },
+                          }
+                        : {}),
+                    }
                   : {})}
                 onDismiss={() => {
+                  if (visibleRecoveryOffer) setDismissedRecoveryOfferId(visibleRecoveryOffer.id);
                   setThreadError(activeThread.id, null);
                   dismissThreadErrorBannerForSession(threadErrorBannerKey);
                   setThreadErrorBannerDismissTick((tick) => tick + 1);
@@ -8559,12 +8677,11 @@ export default function ChatView(props: ChatViewProps) {
                     <ComposerSurface.Shell contextStrip={showComposerContextStrip}>
                       <ComposerSurface.Host>
                         <div ref={attachDraftHeroComposerAnchorRef} className="relative z-10">
-                          {usageLimitsOffered && activeThreadLimitsLabel && activeCodexIdentity ? (
+                          {activeThreadLimitsLabel && activeCodexIdentity ? (
                             <div className="flex justify-end px-2 pb-1">
                               <button
                                 type="button"
                                 aria-label={`${activeCodexIdentity.label} limits`}
-                                title="Show all Codex account limits"
                                 onClick={openUsageLimits}
                                 className="flex max-w-full items-center gap-2 rounded-full border bg-background/90 px-3 py-1.5 text-xs font-medium text-foreground shadow-sm hover:bg-muted"
                                 style={{ borderColor: activeCodexIdentity.color }}

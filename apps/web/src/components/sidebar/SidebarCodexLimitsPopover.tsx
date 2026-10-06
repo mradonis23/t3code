@@ -1,33 +1,17 @@
-import {
-  collectLimitAccounts,
-  formatResetsIn,
-  limitsNotice,
-  remainingPercent,
-} from "@t3tools/shared/usageLimits";
+import { codexAccountSummaries } from "@t3tools/client-runtime/account-recovery";
+import { limitsNotice } from "@t3tools/shared/usageLimits";
 import { useAtomValue } from "@effect/atom-react";
 import { GaugeIcon, LoaderIcon, RefreshCwIcon } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 
-import type {
-  EnvironmentId,
-  ProviderInstanceId,
-  ServerProvider,
-  ServerProviderResetCredits,
-} from "@t3tools/contracts";
+import type { EnvironmentId, ServerProvider } from "@t3tools/contracts";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import { useEnvironments } from "../../state/environments";
-import { useThreadShells } from "../../state/entities";
 import { environmentPresentations } from "../../state/presentation";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
-import {
-  LimitWindows,
-  ResetCreditDialog,
-  ResetCredits,
-  resetCreditsSummary,
-  useResetCredit,
-} from "../usage/UsageLimits";
+import { LimitWindows, ResetCredits } from "../usage/UsageLimits";
 import { Button } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { SidebarMenuButton, SidebarMenuItem } from "../ui/sidebar";
@@ -49,64 +33,10 @@ function codexAccountPresentation(instanceId: string): {
     case "codex_nena":
       return { label: "Nena's Codex", color: "#30D158" };
     case "codex":
-    default:
       return { label: "Dad's Codex", color: "#0A84FF" };
+    default:
+      return { label: instanceId, color: "#0A84FF" };
   }
-}
-
-function SidebarResetCreditPill({
-  environmentId,
-  instanceId,
-  credits,
-  now,
-  color,
-  accountLabel,
-}: {
-  readonly environmentId: EnvironmentId;
-  readonly instanceId: ProviderInstanceId;
-  readonly credits: ServerProviderResetCredits;
-  readonly now: number;
-  readonly color: string;
-  readonly accountLabel: string;
-}) {
-  const { confirming, setConfirming, busy, status, redeem } = useResetCredit(
-    environmentId,
-    instanceId,
-  );
-  if (credits.availableCount === 0 && status === null) return null;
-
-  return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-      {credits.availableCount > 0 ? (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={() => setConfirming(true)}
-          className="inline-flex h-5 shrink-0 items-center gap-1 rounded-full border px-2 text-[9px] font-semibold tabular-nums transition-opacity hover:opacity-80 disabled:opacity-50"
-          style={{
-            borderColor: `${color}80`,
-            backgroundColor: `${color}14`,
-            color,
-          }}
-          aria-label={`Use a reset credit for ${accountLabel}`}
-          title={resetCreditsSummary(credits, now)}
-        >
-          <RefreshCwIcon className={busy ? "size-2.5 animate-spin" : "size-2.5"} />
-          {busy
-            ? "Using…"
-            : `${credits.availableCount} reset${credits.availableCount === 1 ? "" : "s"}`}
-        </button>
-      ) : null}
-      {status ? (
-        <span className="min-w-0 text-[9px] leading-tight text-sidebar-foreground">{status}</span>
-      ) : null}
-      <ResetCreditDialog
-        open={confirming}
-        onOpenChange={setConfirming}
-        onConfirm={() => void redeem()}
-      />
-    </div>
-  );
 }
 
 function CodexLimitProviderCard({
@@ -175,127 +105,30 @@ function CodexLimitProviderCard({
  */
 export function SidebarCodexLimitsSummary() {
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
-  const threadShells = useThreadShells();
-  const [expanded, setExpanded] = useState(false);
-  const accounts = collectLimitAccounts(presentations).filter(
-    (account) => account.driver === "codex",
-  );
-  const activeAccount =
-    [...threadShells]
-      .filter(
-        (thread) => thread.session?.status === "running" || thread.session?.status === "starting",
-      )
-      .sort(
-        (left, right) =>
-          Date.parse(right.session?.updatedAt ?? right.updatedAt ?? right.createdAt) -
-          Date.parse(left.session?.updatedAt ?? left.updatedAt ?? left.createdAt),
-      )
-      .flatMap((thread) => {
-        const instanceId =
-          thread.session?.providerInstanceId ?? thread.modelSelection.instanceId ?? null;
-        if (!instanceId) return [];
-        const account = accounts.find(
-          (candidate) =>
-            candidate.redeem?.instanceId === instanceId &&
-            candidate.redeem.environmentId === thread.environmentId,
-        );
-        return account ? [account] : [];
-      })[0] ??
-    accounts.find((account) => String(account.redeem?.instanceId ?? "") === "codex") ??
-    accounts[0] ??
-    null;
-  const visibleAccounts = expanded ? accounts : activeAccount ? [activeAccount] : [];
   const now = Date.now();
-
   return (
     <div
-      className="mb-1 grid gap-1.5 overflow-hidden rounded-lg border border-border/60 bg-sidebar-accent/35"
+      className="mb-1 grid gap-1.5 rounded-lg border border-border/60 bg-sidebar-accent/35 px-2.5 py-2"
       aria-label="Codex subscription limits summary"
     >
-      <button
-        type="button"
-        className="flex items-center justify-between gap-2 px-2.5 py-2 text-left hover:bg-sidebar-accent/55"
-        aria-expanded={expanded}
-        onClick={() => setExpanded((current) => !current)}
-      >
-        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          ChatGPT limits
-        </span>
-        <span className="text-[10px] font-medium text-muted-foreground">
-          {expanded
-            ? "Show active"
-            : accounts.length > 1
-              ? `Show all ${accounts.length}`
-              : "Details"}
-        </span>
-      </button>
-      <div className="grid gap-1.5 border-t border-border/50 px-2.5 py-2">
-        {accounts.length === 0 ? (
-          <div className="text-[10px] text-muted-foreground">Refreshing subscription limits...</div>
-        ) : visibleAccounts.length === 0 ? (
-          <div className="text-[10px] text-muted-foreground">No Codex limits available.</div>
-        ) : (
-          visibleAccounts.map((account, index) => {
-            const identity = codexAccountPresentation(
-              String(account.redeem?.instanceId ?? "codex"),
-            );
-            const resetCredits = account.limits.resetCredits;
-            return (
-              <div
-                key={account.key}
-                className={
-                  index === 0 ? "grid gap-1" : "grid gap-1 border-t border-border/40 pt-1.5"
-                }
-              >
-                <div className="flex min-w-0 items-center gap-1.5">
-                  <span
-                    className="size-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: identity.color }}
-                    aria-hidden="true"
-                  />
-                  <div className="min-w-0 flex-1 text-[11px] font-semibold text-sidebar-foreground">
-                    {identity.label}
-                  </div>
-                  {account.redeem && resetCredits ? (
-                    <SidebarResetCreditPill
-                      environmentId={account.redeem.environmentId}
-                      instanceId={account.redeem.instanceId}
-                      credits={resetCredits}
-                      now={now}
-                      color={identity.color}
-                      accountLabel={identity.label}
-                    />
-                  ) : null}
-                </div>
-                {account.email ? (
-                  <div className="break-all pl-3.5 text-[9px] leading-tight text-muted-foreground">
-                    {account.email}
-                  </div>
-                ) : null}
-                {account.plan ? (
-                  <div className="pl-3.5 text-[9px] leading-tight text-muted-foreground">
-                    {account.plan}
-                  </div>
-                ) : null}
-                <div className="grid gap-0.5 pl-3.5 text-[10px] tabular-nums text-muted-foreground">
-                  {account.limits.windows.map((window) => {
-                    const resetsIn = formatResetsIn(window, now);
-                    return (
-                      <div key={window.id} className="flex flex-wrap items-baseline gap-x-1">
-                        <span>{window.label}:</span>
-                        <strong className="font-semibold text-sidebar-foreground">
-                          {remainingPercent(window)}%
-                        </strong>
-                        {resetsIn ? <span>- {resetsIn}</span> : null}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })
-        )}
+      <div className="text-[10px] font-semibold uppercase text-muted-foreground">
+        ChatGPT limits
       </div>
+      {[...presentations].flatMap(([environmentId, presentation]) =>
+        codexAccountSummaries(presentation.serverConfig?.providers ?? [], now).map((account) => (
+          <details
+            key={`${environmentId}:${account.instanceId}`}
+            className="text-[10px] text-muted-foreground"
+          >
+            <summary className="cursor-pointer list-none">
+              <strong className="text-sidebar-foreground">{account.label}</strong>
+              {presentations.size > 1 ? ` \u00b7 ${presentation.entry.target.label}` : ""}
+              <div className="tabular-nums">{account.summary}</div>
+            </summary>
+            <div className="pt-1 break-words">{account.detail}</div>
+          </details>
+        )),
+      )}
     </div>
   );
 }

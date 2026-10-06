@@ -1,3 +1,4 @@
+import { codexAccountLabel } from "@t3tools/client-runtime/account-recovery";
 import { autoAnimate } from "@formkit/auto-animate";
 import { useAtomValue } from "@effect/atom-react";
 import * as Schema from "effect/Schema";
@@ -1323,6 +1324,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
             </span>
             {draftIndicator}
             {title}
+            {driverKind === "codex" ? (
+              <span
+                className="max-w-20 shrink-0 truncate text-[10px] text-sidebar-muted-foreground/70"
+                title={codexAccountLabel(String(modelInstanceId), providerEntry?.displayName)}
+              >
+                {codexAccountLabel(String(modelInstanceId), providerEntry?.displayName)}
+              </span>
+            ) : null}
             {pinIndicator}
             {terminalStatusIcon}
             {isRegeneratingTitle ? (
@@ -1645,6 +1654,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
                   <span className="text-red-600 dark:text-red-400">−{diff.deletions}</span>
                 </span>
               ) : null}
+              {driverKind === "codex" ? (
+                <span className="shrink-0 text-[10px] text-sidebar-muted-foreground">
+                  {codexAccountLabel(String(modelInstanceId), providerEntry?.displayName)}
+                </span>
+              ) : null}
               <span
                 aria-hidden
                 className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
@@ -1792,6 +1806,11 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
             className="size-4 shrink-0"
           />
           <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+          {providerEntry?.driverKind === "codex" ? (
+            <span className="shrink-0 text-[10px] text-muted-foreground">
+              {codexAccountLabel(String(modelInstanceId), providerEntry.displayName)}
+            </span>
+          ) : null}
           <span className="shrink-0 text-xs text-muted-foreground/55 tabular-nums">
             {threadTimeLabel(thread)}
           </span>

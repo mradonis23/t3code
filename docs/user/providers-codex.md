@@ -41,7 +41,18 @@ from the other home.
 
 Choose the other account from the thread's model picker. T3 Code offers compatible
 Codex instances that share the thread's **CODEX_HOME path**. Changing accounts does
-not move the conversation into a separate Codex home.
+not move the conversation into a separate Codex home. Stop a starting or running
+turn before switching accounts.
+
+The sidebar or mobile thread list shows remaining usage for every configured
+Codex account. Expand the details to see reset times and account status. An account
+without reported usage shows unavailable rather than an estimated quota.
+
+When a turn reaches its usage limit, **Assisted Codex account recovery** in
+Settings > General can recommend a compatible account with available capacity.
+Accept the offer to continue from the thread's recorded checkpoint evidence.
+Dismissing it keeps the current account. If no alternate is available, queue the
+continuation for later; queued recovery stays paused until you choose to send it.
 
 If the account is missing from the picker, compare the home paths in provider
 settings. If two instances show the same unexpected account or models, check their

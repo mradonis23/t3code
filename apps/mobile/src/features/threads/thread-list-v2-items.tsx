@@ -1,3 +1,4 @@
+import { codexAccountLabel } from "@t3tools/client-runtime/account-recovery";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -797,6 +798,13 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             style={{ fontFamily: MONO_FONT }}
           >
             #{pr.label}
+          </Text>
+        ) : null}
+        {props.providerDriver === "codex" ? (
+          <Text className="shrink-0 text-xs text-foreground-muted">
+            {codexAccountLabel(
+              String(thread.session?.providerInstanceId ?? thread.modelSelection.instanceId),
+            )}
           </Text>
         ) : null}
         {props.providerDriver ? (

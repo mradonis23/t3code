@@ -449,6 +449,40 @@ export const OrchestrationThreadActivity = Schema.Struct({
 });
 export type OrchestrationThreadActivity = typeof OrchestrationThreadActivity.Type;
 
+export const CodexAccountRecoveryOffer = Schema.Struct({
+  fromProviderInstanceId: ProviderInstanceId,
+  toProviderInstanceId: ProviderInstanceId,
+  sourceMessageId: Schema.NullOr(MessageId),
+  reason: Schema.String,
+});
+export type CodexAccountRecoveryOffer = typeof CodexAccountRecoveryOffer.Type;
+
+export const CodexAccountRecoveryUnavailable = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  sourceMessageId: Schema.NullOr(MessageId),
+  reason: Schema.String,
+  detail: Schema.String,
+});
+
+const isCodexAccountRecoveryOffer = Schema.is(CodexAccountRecoveryOffer);
+
+/** An offer expires as soon as the user sends more work or changes accounts. */
+export function pendingCodexAccountRecoveryOffer(thread: OrchestrationThread) {
+  const activity = thread.activities.findLast((entry) =>
+    entry.kind.startsWith("codex.account.failover."),
+  );
+  if (!activity || activity.kind !== "codex.account.failover.offered") return null;
+  if (!isCodexAccountRecoveryOffer(activity.payload)) return null;
+  if (activity.payload.fromProviderInstanceId !== thread.modelSelection.instanceId) return null;
+  if (activity.turnId !== null && activity.turnId !== thread.latestTurn?.turnId) return null;
+  if (
+    (thread.messages.findLast((message) => message.role === "user")?.id ?? null) !==
+    activity.payload.sourceMessageId
+  )
+    return null;
+  return { id: activity.id, summary: activity.summary, ...activity.payload };
+}
+
 const OrchestrationLatestTurnState = Schema.Literals([
   "running",
   "interrupted",
@@ -967,6 +1001,7 @@ export const ThreadTurnStartCommand = Schema.Struct({
     attachments: Schema.Array(ChatAttachment),
   }),
   modelSelection: Schema.optional(ModelSelection),
+  accountRecoveryOfferId: Schema.optional(EventId),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
   interactionMode: ProviderInteractionMode.pipe(
@@ -988,6 +1023,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
     attachments: Schema.Array(Schema.Union([UploadChatAttachment, ChatAttachment])),
   }),
   modelSelection: Schema.optional(ModelSelection),
+  accountRecoveryOfferId: Schema.optional(EventId),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
@@ -1438,6 +1474,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   messageId: MessageId,
   modelSelection: Schema.optional(ModelSelection),
+  accountRecoveryOfferId: Schema.optional(EventId),
   titleSeed: Schema.optional(TrimmedNonEmptyString),
   runtimeMode: RuntimeMode.pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE))),
   interactionMode: ProviderInteractionMode.pipe(

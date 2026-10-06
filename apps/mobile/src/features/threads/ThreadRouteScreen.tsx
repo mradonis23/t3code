@@ -1,3 +1,7 @@
+import {
+  availableAccountRecovery,
+  unavailableAccountRecoveryReason,
+} from "@t3tools/client-runtime/account-recovery";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import {
   StackActions,
@@ -828,6 +832,17 @@ function ThreadRouteContent(
           selectedThreadQueuedMessages={composer.selectedThreadQueuedMessages}
           selectedThreadQueuePaused={composer.selectedThreadQueuePaused}
           checkpointContinuation={checkpointContinuation}
+          accountRecoveryOffer={
+            selectedThreadDetail ? availableAccountRecovery(selectedThreadDetail) : null
+          }
+          onAcceptAccountRecovery={composer.onAcceptAccountRecovery}
+          accountRecoveryUnavailableReason={
+            selectedThreadDetail ? unavailableAccountRecoveryReason(selectedThreadDetail) : null
+          }
+          canRetryLastRequest={
+            selectedThreadDetail?.messages.some((message) => message.role === "user") ?? false
+          }
+          onRetryLastRequest={composer.onRetryLastRequest}
           layoutVariant={layout.variant}
           usesAutomaticContentInsets={usesNativeHeaderGlass}
           onOpenConnectionEditor={handleOpenConnectionEditor}

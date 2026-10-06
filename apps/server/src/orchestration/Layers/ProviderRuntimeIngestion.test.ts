@@ -456,97 +456,157 @@ describe("ProviderRuntimeIngestion", () => {
     };
   }
 
-  it("automatically continues a usage-limited Codex turn on the best alternate account", async () => {
-    const dad = codexProvider({
-      id: "codex",
-      sessionLeft: 0,
-      weeklyLeft: 9,
-      displayName: "Dad",
-    });
-    const mom = codexProvider({
-      id: "codex_mom",
-      sessionLeft: 100,
-      weeklyLeft: 53,
-      displayName: "Mom",
-    });
-    const nena = codexProvider({
-      id: "codex_nena",
-      sessionLeft: 100,
-      weeklyLeft: 57,
-      displayName: "Nena",
-    });
-    const harness = await createHarness({
-      providers: [dad, mom, nena],
-      allowThreadDetailHydration: true,
-      serverSettings: { automaticCodexAccountFailover: true },
-    });
-    const threadId = asThreadId("thread-1");
-    const turnId = asTurnId("turn-usage-limit");
-    const startedAt = "2026-01-01T00:00:01.000Z";
+  it.each(["offer", "unavailable", "disabled"] as const)(
+    "usage-limit recovery: %s never starts silently",
+    async (mode) => {
+      const dad = codexProvider({
+        id: "codex",
+        sessionLeft: 0,
+        weeklyLeft: 9,
+        displayName: "Dad",
+      });
+      const mom = codexProvider({
+        id: "codex_mom",
+        sessionLeft: 100,
+        weeklyLeft: 53,
+        displayName: "Mom",
+      });
+      const nena = codexProvider({
+        id: "codex_nena",
+        sessionLeft: 100,
+        weeklyLeft: 57,
+        displayName: "Nena",
+      });
+      const providers = mode === "unavailable" ? [dad] : [dad, mom, nena];
+      const harness = await createHarness({
+        providers,
+        allowThreadDetailHydration: true,
+        serverSettings: { automaticCodexAccountFailover: mode !== "disabled" },
+      });
+      const threadId = asThreadId("thread-1");
+      const turnId = asTurnId("turn-usage-limit");
+      const startedAt = "2026-01-01T00:00:01.000Z";
 
-    await harness.dispatch({
-      type: "thread.session.set",
-      commandId: CommandId.make("cmd-failover-seed-session"),
-      threadId,
-      session: {
+      await harness.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-failover-seed-session"),
         threadId,
-        status: "running",
-        providerName: "codex",
-        providerInstanceId: ProviderInstanceId.make("codex"),
-        runtimeMode: "approval-required",
-        activeTurnId: turnId,
-        updatedAt: startedAt,
-        lastError: null,
-      },
-      createdAt: startedAt,
-    });
-    harness.setProviderSession({
-      provider: ProviderDriverKind.make("codex"),
-      providerInstanceId: ProviderInstanceId.make("codex"),
-      status: "running",
-      runtimeMode: "approval-required",
-      threadId,
-      activeTurnId: turnId,
-      createdAt: startedAt,
-      updatedAt: startedAt,
-    });
-
-    await harness.emitAndDrain([
-      {
-        type: "turn.completed",
-        eventId: asEventId("evt-codex-usage-limit"),
+        session: {
+          threadId,
+          status: "running",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: turnId,
+          updatedAt: startedAt,
+          lastError: null,
+        },
+        createdAt: startedAt,
+      });
+      harness.setProviderSession({
         provider: ProviderDriverKind.make("codex"),
         providerInstanceId: ProviderInstanceId.make("codex"),
+        status: "running",
+        runtimeMode: "approval-required",
         threadId,
-        createdAt: "2026-01-01T00:00:02.000Z",
-        turnId,
-        payload: {
-          state: "failed",
-          errorMessage: "Usage limit reached. Try again later.",
-        },
-      },
-    ]);
+        activeTurnId: turnId,
+        createdAt: startedAt,
+        updatedAt: startedAt,
+      });
 
-    const thread = await waitForThread(harness.readModel, (entry) =>
-      entry.activities.some((activity) => activity.kind === "codex.account.failover"),
-    );
-    const failover = thread.activities.find(
-      (activity) => activity.kind === "codex.account.failover",
-    );
-    expect(failover?.summary).toBe("Dad's Codex limit reached → continuing on Nena's Codex");
-    expect(failover?.payload).toMatchObject({
-      fromProviderInstanceId: ProviderInstanceId.make("codex"),
-      toProviderInstanceId: ProviderInstanceId.make("codex_nena"),
-    });
-    expect(
-      thread.messages.some(
-        (message) =>
-          message.role === "user" &&
-          message.text.startsWith("CONTINUE FROM EXACT CHECKPOINT") &&
-          message.text.includes("Usage limit reached. Try again later."),
-      ),
-    ).toBe(true);
-  });
+      await expect(
+        harness.dispatch({
+          type: "thread.meta.update",
+          commandId: CommandId.make("reject-running-account-switch"),
+          threadId,
+          modelSelection: {
+            ...(await harness.readModel()).threads[0]!.modelSelection,
+            instanceId: mom.instanceId,
+          },
+        }),
+      ).rejects.toThrow("Stop the active turn");
+
+      await harness.emitAndDrain([
+        {
+          type: "turn.completed",
+          eventId: asEventId("evt-codex-usage-limit"),
+          provider: ProviderDriverKind.make("codex"),
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          threadId,
+          createdAt: "2026-01-01T00:00:02.000Z",
+          turnId,
+          payload: {
+            state: "failed",
+            errorMessage: "Usage limit reached. Try again later.",
+          },
+        },
+      ]);
+
+      const thread = (await harness.readModel()).threads[0]!;
+      expect(thread.modelSelection.instanceId).toBe("codex");
+      expect(thread.messages.filter((message) => message.role === "user")).toHaveLength(0);
+      if (mode === "disabled") {
+        expect(
+          thread.activities.some((activity) => activity.kind.startsWith("codex.account.failover.")),
+        ).toBe(false);
+        return;
+      }
+      if (mode === "unavailable") {
+        expect(
+          thread.activities.find(
+            (activity) => activity.kind === "codex.account.failover.unavailable",
+          )?.summary,
+        ).toBe("No alternate Codex account available");
+        return;
+      }
+      const offer = thread.activities.find(
+        (activity) => activity.kind === "codex.account.failover.offered",
+      )!;
+      expect(offer.summary).toBe(
+        "Dad's Codex is at limit. Continue this thread with Nena's Codex?",
+      );
+      expect(offer.payload).toMatchObject({
+        fromProviderInstanceId: ProviderInstanceId.make("codex"),
+        toProviderInstanceId: ProviderInstanceId.make("codex_nena"),
+      });
+      const accept = (id: string): OrchestrationCommand => ({
+        type: "thread.turn.start",
+        commandId: CommandId.make(id),
+        threadId,
+        accountRecoveryOfferId: offer.id,
+        message: {
+          messageId: MessageId.make(id),
+          role: "user",
+          text: "untrusted client prompt",
+          attachments: [],
+        },
+        modelSelection: { ...thread.modelSelection, instanceId: nena.instanceId },
+        runtimeMode: thread.runtimeMode,
+        interactionMode: thread.interactionMode,
+        createdAt: "2026-01-01T00:00:03.000Z",
+      });
+      // Capacity may change between rendering the offer and accepting it.
+      providers[2] = { ...nena, auth: { status: "unauthenticated" } };
+      await expect(harness.dispatch(accept("reject-stale-capacity"))).rejects.toThrow(
+        "usable capacity",
+      );
+      providers[2] = nena;
+      const accepted = await Promise.allSettled([
+        harness.dispatch(accept("accept-offer-one")),
+        harness.dispatch(accept("accept-offer-two")),
+      ]);
+      expect(accepted.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+      const after = (await harness.readModel()).threads[0]!;
+      const continuationMessages = after.messages.filter((message) => message.role === "user");
+      expect(continuationMessages).toHaveLength(1);
+      expect(continuationMessages[0]?.text).toMatch(/^CONTINUE FROM EXACT CHECKPOINT/);
+      expect(continuationMessages[0]?.text).toContain("Usage limit reached. Try again later.");
+      expect(
+        after.activities.some((activity) => activity.kind === "codex.account.failover.accepted"),
+      ).toBe(true);
+      expect(after.modelSelection.instanceId).toBe("codex_nena");
+    },
+  );
 
   it("maps turn started/completed events into thread session updates", async () => {
     const harness = await createHarness();

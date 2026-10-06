@@ -16,7 +16,7 @@ export function codexAccountPresentation(
 ): CodexAccountPresentation {
   return (
     CODEX_ACCOUNT_PRESENTATIONS[String(instanceId)] ?? {
-      label: "Codex",
+      label: String(instanceId),
       color: "#0A84FF",
     }
   );

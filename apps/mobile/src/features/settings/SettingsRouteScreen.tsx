@@ -775,8 +775,8 @@ function AutoSettleSettingsRows() {
     <>
       <SettingsSwitchRow
         icon="arrow.triangle.branch"
-        label="Automatic Codex account failover"
-        subtitle="Continue on another Codex account when the current account reaches its usage limit"
+        label="Assisted Codex account recovery"
+        subtitle="Recommend another compatible Codex account at a usage limit. Continue only after you accept."
         value={referenceSettings.automaticCodexAccountFailover}
         onValueChange={(value) => writeToAll({ automaticCodexAccountFailover: value })}
       />

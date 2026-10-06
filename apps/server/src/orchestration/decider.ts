@@ -1,3 +1,5 @@
+import { pendingCodexAccountRecoveryOffer } from "@t3tools/contracts";
+import { buildCheckpointContinuation } from "@t3tools/shared/checkpointContinuation";
 import {
   EventId,
   MessageId,
@@ -794,6 +796,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      if (
+        command.modelSelection &&
+        command.modelSelection.instanceId !==
+          (thread.session?.providerInstanceId ?? thread.modelSelection.instanceId) &&
+        (thread.session?.status === "starting" || thread.session?.status === "running")
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Stop the active turn before switching accounts.",
+        });
+      }
       const branch =
         command.branch !== undefined &&
         command.expectedBranch !== undefined &&
@@ -978,6 +991,80 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      const switchingAccount =
+        command.modelSelection !== undefined &&
+        command.modelSelection.instanceId !==
+          (targetThread.session?.providerInstanceId ?? targetThread.modelSelection.instanceId);
+      if (
+        (switchingAccount || command.accountRecoveryOfferId) &&
+        (targetThread.session?.status === "starting" || targetThread.session?.status === "running")
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "Stop the active turn before switching accounts.",
+        });
+      }
+      let messageText = command.message.text;
+      const recoveryEvents: Array<Omit<OrchestrationEvent, "sequence">> = [];
+      if (command.accountRecoveryOfferId) {
+        const offer = pendingCodexAccountRecoveryOffer(targetThread);
+        const continuation = buildCheckpointContinuation({
+          thread: targetThread,
+          connectionState: "connected",
+          gitStatus: null,
+        });
+        if (
+          !offer ||
+          offer.id !== command.accountRecoveryOfferId ||
+          command.modelSelection?.instanceId !== offer.toProviderInstanceId ||
+          command.modelSelection.model !== targetThread.modelSelection.model ||
+          !continuation ||
+          continuation.kind !== "usage-limit" ||
+          command.message.attachments.length > 0
+        ) {
+          return yield* new OrchestrationCommandInvariantError({
+            commandType: command.type,
+            detail:
+              "This account recovery offer is no longer available. Review the current thread state.",
+          });
+        }
+        messageText = continuation.prompt;
+        recoveryEvents.push({
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.meta-updated",
+          payload: {
+            threadId: command.threadId,
+            modelSelection: command.modelSelection,
+            updatedAt: command.createdAt,
+          },
+        });
+        recoveryEvents.push({
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: command.threadId,
+            activity: {
+              id: EventId.make(`${command.accountRecoveryOfferId}:accepted`),
+              tone: "info",
+              kind: "codex.account.failover.accepted",
+              summary: "Codex account recovery accepted",
+              payload: { ...offer, requestId: command.message.messageId },
+              turnId: null,
+              createdAt: command.createdAt,
+            },
+          },
+        });
+      }
       const sourceProposedPlan = command.sourceProposedPlan;
       const sourceThread = sourceProposedPlan
         ? yield* requireThread({
@@ -1014,7 +1101,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           messageId: command.message.messageId,
           role: "user",
-          text: command.message.text,
+          text: messageText,
           attachments: command.message.attachments,
           turnId: null,
           streaming: false,
@@ -1034,6 +1121,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           messageId: command.message.messageId,
+          ...(command.accountRecoveryOfferId
+            ? { accountRecoveryOfferId: command.accountRecoveryOfferId }
+            : {}),
           ...(command.modelSelection !== undefined
             ? { modelSelection: command.modelSelection }
             : {}),
@@ -1082,7 +1172,12 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           },
         });
       }
-      return [...lifecycleResetEvents, userMessageEvent, turnStartRequestedEvent];
+      return [
+        ...lifecycleResetEvents,
+        ...recoveryEvents,
+        userMessageEvent,
+        turnStartRequestedEvent,
+      ];
     }
 
     case "thread.turn.interrupt": {

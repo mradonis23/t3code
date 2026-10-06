@@ -1,3 +1,4 @@
+import { codexAccountSummaries } from "@t3tools/client-runtime/account-recovery";
 import {
   LegendList,
   type LegendListRef,
@@ -39,7 +40,6 @@ import { scopedProjectKey } from "../../lib/scopedEntities";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
 import { useThreadSearch } from "../../state/queries";
-import { useStickyComposerModelSelection } from "../../state/use-composer-drafts";
 import { useThreadListV2Enabled } from "../threads/use-thread-list-v2-enabled";
 import { environmentServerConfigsAtom } from "../../state/server";
 import { AccountLimits, ResetCredits } from "../usage/UsageLimitsSection";
@@ -64,7 +64,6 @@ import {
   type ThreadListV2ListItem,
 } from "../threads/threadListV2";
 import { useThreadListV2ShelfPreferences } from "../threads/use-thread-list-v2-shelf-preferences";
-import { selectActiveHomeLimitEntry } from "./homeUsageLimits.logic";
 import type { HomeListFilterMenuEnvironment } from "./home-list-filter-menu";
 import {
   buildHomeListLayout,
@@ -216,7 +215,6 @@ function HomeTopContentSpacer() {
 
 export function HomeScreen(props: HomeScreenProps) {
   const [limitsExpanded, setLimitsExpanded] = useState(false);
-  const stickyComposerModelSelection = useStickyComposerModelSelection();
   const [groupDisplayStates, setGroupDisplayStates] = useState<
     ReadonlyMap<string, HomeGroupDisplayState>
   >(() => new Map());
@@ -1132,27 +1130,17 @@ export function HomeScreen(props: HomeScreenProps) {
 
   const homeLimitEntries = [...serverConfigs].flatMap(([environmentId, config]) =>
     config.providers.flatMap((provider) =>
-      provider.driver === "codex" && provider.usageLimits ? [{ environmentId, provider }] : [],
+      provider.driver === "codex" ? [{ environmentId, provider }] : [],
     ),
   );
-  const activeLimitEntry = selectActiveHomeLimitEntry({
-    entries: homeLimitEntries,
-    threads: props.threads,
-    selectedEnvironmentId: props.selectedEnvironmentId,
-    stickyProviderInstanceId: stickyComposerModelSelection?.instanceId ?? null,
-  });
-  const visibleHomeLimitEntries = limitsExpanded
-    ? homeLimitEntries
-    : activeLimitEntry
-      ? [activeLimitEntry]
-      : [];
+  const visibleHomeLimitEntries = homeLimitEntries;
   const limitsSummary =
     homeLimitEntries.length === 0 ? null : (
       <View className="mx-4 mb-3 overflow-hidden rounded-2xl border border-border bg-card">
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={
-            limitsExpanded ? "Show active Codex limits only" : "Show all Codex limits"
+            limitsExpanded ? "Hide Codex limit details" : "Show Codex limit details"
           }
           onPress={() => setLimitsExpanded((expanded) => !expanded)}
           className="border-b border-border-subtle px-4 py-2.5 active:bg-subtle"
@@ -1160,41 +1148,48 @@ export function HomeScreen(props: HomeScreenProps) {
           <View className="flex-row items-center justify-between gap-3">
             <Text className="text-xs font-t3-medium text-foreground-muted">CHATGPT LIMITS</Text>
             <Text className="text-xs font-t3-medium text-foreground-secondary">
-              {limitsExpanded
-                ? "Show active"
-                : homeLimitEntries.length > 1
-                  ? `Show all ${homeLimitEntries.length}`
-                  : "Details"}
+              {limitsExpanded ? "Hide details" : "Details"}
             </Text>
           </View>
         </Pressable>
         {visibleHomeLimitEntries.map(({ environmentId, provider }, index) => {
           const account = codexAccountPresentation(provider.instanceId);
+          const summary = codexAccountSummaries([provider], Date.now())[0]!;
           return (
-            <AccountLimits
-              key={`${environmentId}:${provider.instanceId}`}
-              dense
-              first={index === 0}
-              driver={provider.driver}
-              label={account.label}
-              instanceLabel={provider.auth.email?.trim() || account.label}
-              detail={provider.auth.label?.trim() || provider.auth.type}
-              limits={provider.usageLimits}
-              now={Date.now()}
-              colorOverride={account.color}
-              footer={
-                provider.usageLimits?.resetCredits ? (
-                  <ResetCredits
-                    environmentId={environmentId}
-                    instanceId={provider.instanceId}
-                    credits={provider.usageLimits.resetCredits}
-                    now={Date.now()}
-                    dense
-                    colorOverride={account.color}
-                  />
-                ) : undefined
-              }
-            />
+            <View key={`${environmentId}:${provider.instanceId}`}>
+              <View className="px-4 py-2">
+                <Text className="text-xs font-t3-bold text-foreground">{account.label}</Text>
+                <Text className="text-xs text-foreground-muted">{summary.summary}</Text>
+                {limitsExpanded ? (
+                  <Text className="mt-1 text-xs text-foreground-muted">{summary.detail}</Text>
+                ) : null}
+              </View>
+              {limitsExpanded ? (
+                <AccountLimits
+                  dense
+                  first={index === 0}
+                  driver={provider.driver}
+                  label={account.label}
+                  instanceLabel={provider.auth.email?.trim() || account.label}
+                  detail={provider.auth.label?.trim() || provider.auth.type}
+                  limits={provider.usageLimits}
+                  now={Date.now()}
+                  colorOverride={account.color}
+                  footer={
+                    provider.usageLimits?.resetCredits ? (
+                      <ResetCredits
+                        environmentId={environmentId}
+                        instanceId={provider.instanceId}
+                        credits={provider.usageLimits.resetCredits}
+                        now={Date.now()}
+                        dense
+                        colorOverride={account.color}
+                      />
+                    ) : undefined
+                  }
+                />
+              ) : null}
+            </View>
           );
         })}
       </View>

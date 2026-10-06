@@ -1,3 +1,4 @@
+import { type availableAccountRecovery } from "@t3tools/client-runtime/account-recovery";
 import { type EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import {
   appendCodexArtifactTemplateUsePrompt,
@@ -132,6 +133,11 @@ export interface ThreadDetailScreenProps {
   readonly selectedThreadQueuedMessages: ReadonlyArray<QueuedThreadMessage>;
   readonly selectedThreadQueuePaused: boolean;
   readonly checkpointContinuation: CheckpointContinuation | null;
+  readonly accountRecoveryOffer: ReturnType<typeof availableAccountRecovery>;
+  readonly onAcceptAccountRecovery: () => Promise<boolean>;
+  readonly accountRecoveryUnavailableReason: string | null;
+  readonly canRetryLastRequest: boolean;
+  readonly onRetryLastRequest: () => Promise<boolean>;
   readonly serverConfig: T3ServerConfig | null;
   readonly layoutVariant?: LayoutVariant;
   readonly usesAutomaticContentInsets?: boolean;
@@ -995,6 +1001,11 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
                   queuedMessages={props.selectedThreadQueuedMessages}
                   queuePaused={props.selectedThreadQueuePaused}
                   checkpointContinuation={props.checkpointContinuation}
+                  accountRecoveryOffer={props.accountRecoveryOffer}
+                  onAcceptAccountRecovery={props.onAcceptAccountRecovery}
+                  accountRecoveryUnavailableReason={props.accountRecoveryUnavailableReason}
+                  canRetryLastRequest={props.canRetryLastRequest}
+                  onRetryLastRequest={props.onRetryLastRequest}
                   environmentId={props.environmentId}
                   projectCwd={props.threadCwd ?? props.projectWorkspaceRoot}
                   bottomInset={composerBottomInset}

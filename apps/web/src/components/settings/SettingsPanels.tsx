@@ -569,7 +569,7 @@ export function useSettingsRestore(onRestored?: () => void) {
         : []),
       ...(settings.automaticCodexAccountFailover !==
       DEFAULT_UNIFIED_SETTINGS.automaticCodexAccountFailover
-        ? ["Automatic Codex account failover"]
+        ? ["Assisted Codex account recovery"]
         : []),
       ...(isBackgroundActivityDirty ? ["Background activity"] : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
@@ -2137,12 +2137,12 @@ export function GeneralSettingsPanel() {
         <SettingsRow
           serverScoped
           {...searchableSetting("automatic-codex-account-failover")}
-          description="When a Codex account reaches its usage limit, continue the same task automatically on the configured Codex account with the best available capacity."
+          description="When a Codex account reaches its usage limit, offer the compatible account with the best available capacity. Continuation always requires your approval."
           resetAction={
             settings.automaticCodexAccountFailover !==
             DEFAULT_UNIFIED_SETTINGS.automaticCodexAccountFailover ? (
               <SettingResetButton
-                label="automatic Codex account failover"
+                label="assisted Codex account recovery"
                 onClick={() =>
                   updateSettings({
                     automaticCodexAccountFailover:
@@ -2158,7 +2158,7 @@ export function GeneralSettingsPanel() {
               onCheckedChange={(checked) =>
                 updateSettings({ automaticCodexAccountFailover: Boolean(checked) })
               }
-              aria-label="Automatic Codex account failover"
+              aria-label="Assisted Codex account recovery"
             />
           }
         />

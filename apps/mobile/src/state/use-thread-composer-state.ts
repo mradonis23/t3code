@@ -1,3 +1,7 @@
+import {
+  accountSwitchBlocked,
+  availableAccountRecovery,
+} from "@t3tools/client-runtime/account-recovery";
 import { useAtomValue } from "@effect/atom-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert } from "react-native";
@@ -123,6 +127,7 @@ export function useThreadComposerState() {
   const [feedbackSubmissionsByThreadKey, setFeedbackSubmissionsByThreadKey] = useState<
     Record<string, ReadonlyArray<CodexFeedbackSubmission>>
   >({});
+  const startAccountRecoveryTurn = useAtomCommand(threadEnvironment.startTurn);
   const uploadThreadFeedback = useAtomCommand(threadEnvironment.uploadFeedback, {
     reportFailure: false,
   });
@@ -416,6 +421,93 @@ export function useThreadComposerState() {
     ],
   );
 
+  const onRetryLastRequest = useCallback(async () => {
+    const thread = selectedThreadDetail;
+    const message = thread?.messages.findLast((entry) => entry.role === "user");
+    if (
+      !thread ||
+      !message ||
+      !selectedThreadShell ||
+      selectedEnvironmentRuntime?.connectionState !== "connected" ||
+      thread.session?.status === "starting" ||
+      thread.session?.status === "running"
+    )
+      return false;
+    const metadata = makeQueuedMessageMetadata();
+    const result = await startAccountRecoveryTurn({
+      environmentId: selectedThreadShell.environmentId,
+      input: {
+        commandId: CommandId.make(metadata.commandId),
+        threadId: thread.id,
+        message: {
+          messageId: MessageId.make(metadata.messageId),
+          role: "user",
+          text: message.text,
+          attachments: message.attachments ?? [],
+        },
+        modelSelection: thread.modelSelection,
+        runtimeMode: thread.runtimeMode,
+        interactionMode: thread.interactionMode,
+        createdAt: metadata.createdAt,
+      },
+    });
+    return result._tag !== "Failure";
+  }, [
+    selectedThreadDetail,
+    selectedThreadShell,
+    selectedEnvironmentRuntime?.connectionState,
+    startAccountRecoveryTurn,
+  ]);
+
+  const onAcceptAccountRecovery = useCallback(async () => {
+    if (
+      !selectedThreadDetail ||
+      !selectedThreadShell ||
+      selectedEnvironmentRuntime?.connectionState !== "connected"
+    )
+      return false;
+    const offer = availableAccountRecovery(selectedThreadDetail);
+    if (!offer) return false;
+    const metadata = makeQueuedMessageMetadata();
+    const result = await startAccountRecoveryTurn({
+      environmentId: selectedThreadShell.environmentId,
+      input: {
+        commandId: CommandId.make(metadata.commandId),
+        threadId: selectedThreadShell.id,
+        accountRecoveryOfferId: offer.id,
+        message: {
+          messageId: MessageId.make(metadata.messageId),
+          role: "user",
+          text: "",
+          attachments: [],
+        },
+        modelSelection: {
+          ...selectedThreadDetail.modelSelection,
+          instanceId: offer.toProviderInstanceId,
+        },
+        runtimeMode: selectedThreadDetail.runtimeMode,
+        interactionMode: selectedThreadDetail.interactionMode,
+        createdAt: metadata.createdAt,
+      },
+    });
+    if (result._tag === "Failure") return false;
+    updateComposerDraftSettings(
+      scopedThreadKey(selectedThreadShell.environmentId, selectedThreadShell.id),
+      {
+        modelSelection: {
+          ...selectedThreadDetail.modelSelection,
+          instanceId: offer.toProviderInstanceId,
+        },
+      },
+    );
+    return true;
+  }, [
+    selectedThreadDetail,
+    selectedThreadShell,
+    selectedEnvironmentRuntime?.connectionState,
+    startAccountRecoveryTurn,
+  ]);
+
   const onQueueCheckpointContinuation = useCallback(
     async (text: string, deliveryMode: NonNullable<QueuedThreadMessage["deliveryMode"]>) => {
       const normalizedText = text.trim();
@@ -584,6 +676,13 @@ export function useThreadComposerState() {
       if (!selectedThreadKey) {
         return;
       }
+      if (selectedThreadShell && accountSwitchBlocked(selectedThreadShell, value.instanceId)) {
+        Alert.alert(
+          "Stop the active turn before switching accounts",
+          "The current account is still writing to this thread.",
+        );
+        return;
+      }
       const provider = selectedEnvironmentRuntime?.serverConfig?.providers.find(
         (candidate) => candidate.instanceId === value.instanceId,
       );
@@ -595,7 +694,7 @@ export function useThreadComposerState() {
       });
       setStickyComposerModelSelection(value);
     },
-    [selectedEnvironmentRuntime?.serverConfig, selectedThreadKey],
+    [selectedEnvironmentRuntime?.serverConfig, selectedThreadKey, selectedThreadShell],
   );
 
   const onUpdateRuntimeMode = useCallback(
@@ -768,6 +867,8 @@ export function useThreadComposerState() {
     onRemoveDraftImage,
     onSendMessage,
     onQueueCheckpointContinuation,
+    onAcceptAccountRecovery,
+    onRetryLastRequest,
     onEditQueuedMessage,
     onDeleteQueuedMessage,
     onMoveQueuedMessage,

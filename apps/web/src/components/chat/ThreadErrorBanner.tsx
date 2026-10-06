@@ -37,10 +37,22 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   error,
   onDismiss,
   onContinue,
+  onQueue,
+  onRetry,
+  onSwitchAccount,
+  onAcceptAccount,
+  accountActionLabel,
+  accountActionDisabled,
 }: {
   error: string | null;
   onDismiss?: () => void;
   onContinue?: () => void;
+  onQueue?: () => void;
+  onRetry?: () => void;
+  onSwitchAccount?: () => void;
+  onAcceptAccount?: () => void;
+  accountActionLabel?: string;
+  accountActionDisabled?: boolean;
 }) {
   if (!error) return null;
   return (
@@ -60,8 +72,33 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
             </TooltipPopup>
           </Tooltip>
         </AlertDescription>
-        {(onContinue || onDismiss) && (
-          <AlertAction className="flex items-center gap-1">
+        {(onContinue || onDismiss || onAcceptAccount || onRetry || onSwitchAccount || onQueue) && (
+          <AlertAction className="flex flex-wrap items-center gap-1">
+            {onRetry ? (
+              <Button variant="outline" size="xs" onClick={onRetry}>
+                Retry last request
+              </Button>
+            ) : null}
+            {onSwitchAccount ? (
+              <Button variant="outline" size="xs" onClick={onSwitchAccount}>
+                Switch account
+              </Button>
+            ) : null}
+            {onQueue ? (
+              <Button variant="outline" size="xs" onClick={onQueue}>
+                Queue for later
+              </Button>
+            ) : null}
+            {onAcceptAccount ? (
+              <Button
+                variant="outline"
+                size="xs"
+                disabled={accountActionDisabled}
+                onClick={onAcceptAccount}
+              >
+                {accountActionLabel}
+              </Button>
+            ) : null}
             {onContinue ? (
               <Button variant="outline" size="xs" onClick={onContinue}>
                 Continue from checkpoint

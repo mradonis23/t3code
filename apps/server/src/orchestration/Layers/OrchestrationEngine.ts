@@ -1,3 +1,7 @@
+import { ProjectionTurnRepository } from "../../persistence/Services/ProjectionTurns.ts";
+import { ProjectionTurnRepositoryLive } from "../../persistence/Layers/ProjectionTurns.ts";
+import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import { providerHasUsableCodexCapacity } from "../codexAccountFailover.ts";
 import type {
   OrchestrationClientOrigin,
   OrchestrationEvent,
@@ -89,6 +93,8 @@ const makeOrchestrationEngine = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery;
   const threadBackgroundLiveness = yield* ThreadBackgroundLivenessService;
   const crypto = yield* Crypto.Crypto;
+  const projectionTurns = yield* ProjectionTurnRepository;
+  const recoveryProviderRegistry = yield* Effect.serviceOption(ProviderRegistry);
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
   let commandReadModel = createEmptyReadModel(yield* nowIso);
@@ -218,9 +224,92 @@ const makeOrchestrationEngine = Effect.gen(function* () {
           envelope.command.type === "thread.user-input.respond"
             ? yield* projectionSnapshotQuery.getUserInputActivity(envelope.command)
             : Option.none();
+        const accountCommand = envelope.command;
+        if (
+          (accountCommand.type === "thread.turn.start" ||
+            accountCommand.type === "thread.meta.update") &&
+          (accountCommand.modelSelection ||
+            (accountCommand.type === "thread.turn.start" && accountCommand.accountRecoveryOfferId))
+        ) {
+          const thread = commandReadModel.threads.find(
+            (entry) => entry.id === accountCommand.threadId,
+          );
+          if (
+            accountCommand.modelSelection?.instanceId !==
+              (thread?.session?.providerInstanceId ?? thread?.modelSelection.instanceId) ||
+            (accountCommand.type === "thread.turn.start" && accountCommand.accountRecoveryOfferId)
+          ) {
+            const pendingStart = yield* projectionTurns
+              .getPendingTurnStartByThreadId({ threadId: accountCommand.threadId })
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationCommandInvariantError({
+                      commandType: accountCommand.type,
+                      detail: "Could not verify pending writer state.",
+                      cause,
+                    }),
+                ),
+              );
+            if (
+              Option.isSome(pendingStart) ||
+              threadBackgroundLiveness.getThreadBackgroundLiveness(accountCommand.threadId) !== null
+            ) {
+              return yield* new OrchestrationCommandInvariantError({
+                commandType: accountCommand.type,
+                detail: "Wait for pending or background work to finish before switching accounts.",
+              });
+            }
+          }
+        }
+        let decisionReadModel = commandReadModel;
+        if (
+          envelope.command.type === "thread.turn.start" &&
+          envelope.command.accountRecoveryOfferId
+        ) {
+          const recoveryThread = yield* projectionSnapshotQuery.getThreadDetailById(
+            envelope.command.threadId,
+          );
+          const providers = Option.isSome(recoveryProviderRegistry)
+            ? yield* recoveryProviderRegistry.value.getProviders
+            : [];
+          const current = Option.isSome(recoveryThread)
+            ? providers.find(
+                (provider) =>
+                  provider.instanceId === recoveryThread.value.modelSelection.instanceId,
+              )
+            : undefined;
+          const target = providers.find(
+            (provider) =>
+              provider.instanceId ===
+              (envelope.command.type === "thread.turn.start"
+                ? envelope.command.modelSelection?.instanceId
+                : undefined),
+          );
+          if (
+            Option.isNone(recoveryThread) ||
+            !current ||
+            !target ||
+            !providerHasUsableCodexCapacity(target) ||
+            (current.continuation?.groupKey &&
+              current.continuation.groupKey !== target.continuation?.groupKey)
+          ) {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: envelope.command.type,
+              detail:
+                "The recommended account no longer reports usable capacity. Refresh account limits and try again.",
+            });
+          }
+          decisionReadModel = {
+            ...commandReadModel,
+            threads: commandReadModel.threads.map((thread) =>
+              thread.id === recoveryThread.value.id ? recoveryThread.value : thread,
+            ),
+          };
+        }
         const eventBase = yield* decideOrchestrationCommand({
           command: envelope.command,
-          readModel: commandReadModel,
+          readModel: decisionReadModel,
           ...(Option.isSome(userInputActivity)
             ? { userInputActivity: userInputActivity.value }
             : {}),
@@ -446,4 +535,4 @@ const makeOrchestrationEngine = Effect.gen(function* () {
 export const OrchestrationEngineLive = Layer.effect(
   OrchestrationEngineService,
   makeOrchestrationEngine,
-);
+).pipe(Layer.provide(ProjectionTurnRepositoryLive));

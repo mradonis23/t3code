@@ -1,3 +1,4 @@
+import { type availableAccountRecovery } from "@t3tools/client-runtime/account-recovery";
 import { useAtomValue } from "@effect/atom-react";
 import type {
   EnvironmentId,
@@ -132,6 +133,11 @@ export interface ThreadComposerProps {
   readonly queuedMessages: ReadonlyArray<QueuedThreadMessage>;
   readonly queuePaused: boolean;
   readonly checkpointContinuation: CheckpointContinuation | null;
+  readonly accountRecoveryOffer: ReturnType<typeof availableAccountRecovery>;
+  readonly onAcceptAccountRecovery: () => Promise<boolean>;
+  readonly accountRecoveryUnavailableReason: string | null;
+  readonly canRetryLastRequest: boolean;
+  readonly onRetryLastRequest: () => Promise<boolean>;
   readonly environmentId: EnvironmentId;
   readonly projectCwd: string | null;
   readonly editorRef?: RefObject<ComposerEditorHandle | null>;
@@ -345,6 +351,19 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const [queueVisible, setQueueVisible] = useState(false);
   const [continuationVisible, setContinuationVisible] = useState(false);
   const hasContent = props.draftMessage.trim().length > 0 || props.draftAttachments.length > 0;
+  const [dismissedRecoveryOfferId, setDismissedRecoveryOfferId] = useState<string | null>(null);
+  const [acceptingRecovery, setAcceptingRecovery] = useState(false);
+  const recoveryOffer =
+    props.accountRecoveryOffer?.id === dismissedRecoveryOfferId ? null : props.accountRecoveryOffer;
+  const acceptRecovery = async () => {
+    if (acceptingRecovery) return;
+    setAcceptingRecovery(true);
+    try {
+      await props.onAcceptAccountRecovery();
+    } finally {
+      setAcceptingRecovery(false);
+    }
+  };
   const threadBusy =
     props.selectedThread.session?.status === "running" ||
     props.selectedThread.session?.status === "starting";
@@ -703,19 +722,73 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           </View>
         ) : null}
 
-        {props.checkpointContinuation ? (
-          <Pressable
-            accessibilityLabel="Continue from checkpoint"
-            accessibilityRole="button"
-            onPress={() => setContinuationVisible(true)}
-            className="mx-3 mb-2 rounded-2xl border border-border bg-card px-3.5 py-3 active:opacity-70"
-          >
-            <Text className="text-sm font-t3-bold text-foreground">Continue from checkpoint</Text>
-            <Text className="mt-0.5 text-xs leading-4 text-foreground-muted" numberOfLines={2}>
-              The last turn ended without confirmed completion. Review and continue from preserved
-              evidence.
+        {props.checkpointContinuation || recoveryOffer ? (
+          <View className="mx-3 mb-2 rounded-2xl border border-border bg-card px-3.5 py-3">
+            <Text className="text-sm font-t3-bold text-foreground">
+              {recoveryOffer?.summary ??
+                props.accountRecoveryUnavailableReason ??
+                props.checkpointContinuation?.reason}
             </Text>
-          </Pressable>
+            <View className="mt-2 flex-row flex-wrap gap-4">
+              {recoveryOffer ? (
+                <>
+                  <Pressable
+                    accessibilityRole="button"
+                    disabled={acceptingRecovery || props.connectionState !== "connected"}
+                    onPress={() => void acceptRecovery()}
+                  >
+                    <Text className="text-sm font-t3-bold text-primary">
+                      Continue with{" "}
+                      {codexAccountPresentation(recoveryOffer.toProviderInstanceId).label}
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setDismissedRecoveryOfferId(recoveryOffer.id)}
+                  >
+                    <Text className="text-sm text-foreground-muted">Dismiss offer</Text>
+                  </Pressable>
+                </>
+              ) : null}
+              {props.checkpointContinuation ? (
+                <>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() => setContinuationVisible(true)}
+                  >
+                    <Text className="text-sm text-primary">Continue from checkpoint</Text>
+                  </Pressable>
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={() =>
+                      void props.onQueueCheckpointContinuation(
+                        props.checkpointContinuation!.prompt,
+                        "paused",
+                      )
+                    }
+                  >
+                    <Text className="text-sm text-primary">Queue for later</Text>
+                  </Pressable>
+                  {!threadBusy && activeCodexAccount ? (
+                    <Pressable accessibilityRole="button" onPress={openSettings}>
+                      <Text className="text-sm text-primary">Switch account</Text>
+                    </Pressable>
+                  ) : null}
+                  {props.canRetryLastRequest &&
+                  !threadBusy &&
+                  props.connectionState === "connected" &&
+                  props.checkpointContinuation.kind !== "usage-limit" ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      onPress={() => void props.onRetryLastRequest()}
+                    >
+                      <Text className="text-sm text-primary">Retry last request</Text>
+                    </Pressable>
+                  ) : null}
+                </>
+              ) : null}
+            </View>
+          </View>
         ) : null}
 
         {connectionStatus ? (
@@ -778,6 +851,18 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                 onPickMedia={props.onPickDraftMedia}
                 onPickFiles={props.onPickDraftFiles}
               />
+            ) : null}
+            {!isExpanded && activeCodexAccount ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${activeCodexAccount.label}: model and account settings`}
+                onPress={openSettings}
+                className="max-w-24 px-1"
+              >
+                <Text numberOfLines={1} className="text-2xs font-t3-bold text-foreground">
+                  {activeCodexAccount.label}
+                </Text>
+              </Pressable>
             ) : null}
             {isExpanded && props.draftAttachments.length > 0 ? (
               <Animated.View
@@ -946,7 +1031,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
                       onPickFiles={props.onPickDraftFiles}
                     />
                     <View className="min-w-0 shrink flex-row items-center gap-1">
-                      {usageLimitsOffered && activeLimitsInlineLabel ? (
+                      {activeLimitsInlineLabel ? (
                         <ComposerInlineControl
                           accessibilityLabel={`${activeCodexAccount?.label ?? "Codex"} limits`}
                           accessibilityHint="Shows the current account session and weekly limits"

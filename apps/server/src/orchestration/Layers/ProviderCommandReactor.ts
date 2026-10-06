@@ -1,3 +1,4 @@
+import { providerHasUsableCodexCapacity } from "../codexAccountFailover.ts";
 import {
   type ChatAttachment,
   CommandId,
@@ -616,9 +617,22 @@ const make = Effect.gen(function* () {
       activeSession !== undefined &&
       activeSession.providerInstanceId !== undefined
         ? activeSession.providerInstanceId
-        : thread.modelSelection.instanceId;
+        : (thread.session?.providerInstanceId ?? thread.modelSelection.instanceId);
     const desiredModelSelection = requestedModelSelection ?? thread.modelSelection;
     const desiredInstanceId = desiredModelSelection.instanceId;
+    if (
+      desiredInstanceId !== currentInstanceId &&
+      (activeSession?.status === "running" ||
+        activeSession?.activeTurnId != null ||
+        thread.session?.status === "starting" ||
+        thread.session?.status === "running")
+    ) {
+      return yield* new ProviderAdapterRequestError({
+        provider: providerErrorLabelFromInstanceHint({ instanceId: String(currentInstanceId) }),
+        method: "thread.turn.start",
+        detail: "Stop the active turn before switching accounts.",
+      });
+    }
     const currentInfo = yield* providerService.getInstanceInfo(currentInstanceId).pipe(
       Effect.mapError(
         () =>
@@ -1246,6 +1260,20 @@ const make = Effect.gen(function* () {
           }),
         ),
       );
+
+    if (event.payload.accountRecoveryOfferId) {
+      const providers = yield* providerRegistry.getProviders;
+      const target = providers.find(
+        (provider) => provider.instanceId === event.payload.modelSelection?.instanceId,
+      );
+      if (!target || !providerHasUsableCodexCapacity(target)) {
+        yield* appendTurnStartFailure(
+          "Account recovery unavailable",
+          "The approved account no longer reports usable capacity. Refresh account limits before continuing.",
+        );
+        return;
+      }
+    }
 
     const authCommandHandled = yield* Effect.gen(function* () {
       // Native account commands belong to the thread's existing provider session.

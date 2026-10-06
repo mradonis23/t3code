@@ -127,6 +127,28 @@ describe("Codex account failover", () => {
     ).toBe(mom.instanceId);
   });
 
+  it("recommends only accounts with compatible native continuation state", () => {
+    const dad = {
+      ...provider({ id: "codex", sessionLeft: 0, weeklyLeft: 9 }),
+      continuation: { groupKey: "shared-home" },
+    };
+    const mom = {
+      ...provider({ id: "codex_mom", sessionLeft: 100, weeklyLeft: 53 }),
+      continuation: { groupKey: "shared-home" },
+    };
+    const nena = {
+      ...provider({ id: "codex_nena", sessionLeft: 100, weeklyLeft: 100 }),
+      continuation: { groupKey: "separate-home" },
+    };
+    expect(
+      selectCodexFailoverProvider({
+        providers: [dad, mom, nena],
+        currentInstanceId: dad.instanceId,
+        modelSelection: selection,
+      })?.instanceId,
+    ).toBe(mom.instanceId);
+  });
+
   it("returns no target when every alternate account is exhausted or unavailable", () => {
     const dad = provider({ id: "codex", sessionLeft: 0, weeklyLeft: 9 });
     const mom = provider({ id: "codex_mom", sessionLeft: 0, weeklyLeft: 53 });
