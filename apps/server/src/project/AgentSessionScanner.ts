@@ -1223,8 +1223,9 @@ export const make = Effect.gen(function* () {
     const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
     const cutoffMs = nowMs - RECENT_THREAD_WINDOW_MS;
 
-    const candidates = cachedCandidates ?? (yield* collectCandidates()).candidates;
-    cachedCandidates = candidates;
+    const cached = cachedCandidates;
+    cachedCandidates = null;
+    const candidates = cached ?? (yield* collectCandidates()).candidates;
 
     const eligibleTranscripts: Array<{
       readonly candidate: RawCandidate;

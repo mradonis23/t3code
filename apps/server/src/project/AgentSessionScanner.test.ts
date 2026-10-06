@@ -1766,6 +1766,65 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
       }
     }
 
+    it.effect("refreshes transcript discovery after the cached candidate set is consumed", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
+        yield* TestClock.setTime(nowMs);
+        const claudeHomePath = yield* makeTempDir("t3code-refresh-claude-");
+        const codexHomePath = yield* makeTempDir("t3code-refresh-codex-");
+        const workspace = yield* makeTempDir("t3code-refresh-workspace-");
+        const transcriptContents = (sessionId: string, message: string) =>
+          [
+            encodeTranscriptRecord({
+              type: "session_meta",
+              payload: { id: sessionId, cwd: workspace },
+            }),
+            encodeTranscriptRecord({
+              type: "event_msg",
+              payload: { type: "user_message", message },
+            }),
+          ].join("\n");
+        yield* writeTranscript({
+          filePath: path.join(codexHomePath, "sessions", "2026", "08", "24", "rollout-first.jsonl"),
+          contents: transcriptContents("first-session", "First prompt"),
+          mtimeMs: nowMs,
+        });
+
+        yield* Effect.gen(function* () {
+          const scanner = yield* AgentSessionScanner.AgentSessionScanner;
+          const initial = yield* scanner.recentThreads(workspace).pipe(Stream.runCollect);
+          expect(initial[0]).toMatchObject({
+            _tag: "Importable",
+            thread: { providerSessionId: "first-session" },
+          });
+
+          yield* writeTranscript({
+            filePath: path.join(
+              codexHomePath,
+              "sessions",
+              "2026",
+              "08",
+              "24",
+              "rollout-second.jsonl",
+            ),
+            contents: transcriptContents("second-session", "Second prompt"),
+            mtimeMs: nowMs,
+          });
+
+          const refreshed = yield* scanner.recentThreads(workspace).pipe(Stream.runCollect);
+          expect(Array.from(refreshed)).toEqual(
+            expect.arrayContaining([
+              expect.objectContaining({
+                _tag: "Importable",
+                thread: expect.objectContaining({ providerSessionId: "second-session" }),
+              }),
+            ]),
+          );
+        }).pipe(Effect.provide(makeScannerTestLayer({ claudeHomePath, codexHomePath })));
+      }),
+    );
+
     it.effect("checks file identity and provider before skipping completed history", () =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
