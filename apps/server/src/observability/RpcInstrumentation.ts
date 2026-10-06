@@ -16,6 +16,7 @@ const DEFAULT_RPC_SPAN_ATTRIBUTES = {
   "rpc.system": "effect-rpc",
 } as const;
 const RPC_METHODS_WITH_TRACING_DISABLED: ReadonlySet<string> = new Set([
+  WS_METHODS.serverGetOperationalDiagnostics,
   WS_METHODS.serverGetTraceDiagnostics,
   WS_METHODS.serverGetProcessDiagnostics,
   WS_METHODS.serverGetProcessResourceHistory,

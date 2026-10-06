@@ -7,7 +7,6 @@ import {
   FolderOpenIcon,
   InfoIcon,
 } from "lucide-react";
-import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -26,13 +25,9 @@ import { ensureLocalApi } from "../../localApi";
 import { resolveAndPersistPreferredEditor } from "../../editorPreferences";
 import { formatRelativeTimeLabel, getRelativeTimeState } from "../../timestampFormat";
 import { useEnvironmentQuery } from "../../state/query";
-import {
-  primaryServerAvailableEditorsAtom,
-  primaryServerObservabilityAtom,
-  serverEnvironment,
-} from "../../state/server";
+import { serverEnvironment } from "../../state/server";
 import { shellEnvironment } from "../../state/shell";
-import { usePrimaryEnvironment } from "../../state/environments";
+import { usePrimaryEnvironment, useEnvironments, useEnvironment } from "../../state/environments";
 import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { Button } from "../ui/button";
 import { ScrollArea } from "../ui/scroll-area";
@@ -43,6 +38,8 @@ import { ExpandableText } from "./ExpandableText";
 import { ResourceTelemetryDiagnostics } from "./ResourceTelemetryDiagnostics";
 import { SettingsPageContainer, SettingsSection, useRelativeTimeTick } from "./settingsLayout";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { OperationalStatus } from "./OperationalStatus";
+import type { EnvironmentId } from "@t3tools/contracts";
 
 const NUMBER_FORMAT = new Intl.NumberFormat();
 
@@ -776,10 +773,18 @@ function DiagnosticsRefreshButton({
 }
 
 export function DiagnosticsSettingsPanel() {
-  const observability = useAtomValue(primaryServerObservabilityAtom);
-  const availableEditors = useAtomValue(primaryServerAvailableEditorsAtom);
   const primaryEnvironment = usePrimaryEnvironment();
-  const environmentId = primaryEnvironment?.environmentId ?? null;
+  const { environments } = useEnvironments();
+  const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(null);
+  const environmentId =
+    environments.find((entry) => entry.environmentId === selectedEnvironmentId)?.environmentId ??
+    primaryEnvironment?.environmentId ??
+    environments.find((entry) => entry.connection.phase === "connected")?.environmentId ??
+    environments[0]?.environmentId ??
+    null;
+  const selectedEnvironment = useEnvironment(environmentId);
+  const observability = selectedEnvironment?.serverConfig?.observability ?? null;
+  const availableEditors = selectedEnvironment?.serverConfig?.availableEditors ?? [];
   const signalServerProcess = useAtomCommand(serverEnvironment.signalProcess, {
     reportFailure: false,
   });
@@ -960,9 +965,42 @@ export function DiagnosticsSettingsPanel() {
 
   return (
     <SettingsPageContainer width="expanded" className="gap-10">
-      <ResourceTelemetryDiagnostics />
+      {environments.length > 1 ? (
+        <div className="flex flex-wrap gap-2" aria-label="Diagnostics environment">
+          {environments.map((entry) => (
+            <Button
+              key={entry.environmentId}
+              size="xs"
+              variant={entry.environmentId === environmentId ? "default" : "outline"}
+              onClick={() => setSelectedEnvironmentId(entry.environmentId)}
+            >
+              {entry.label}
+            </Button>
+          ))}
+        </div>
+      ) : null}
+      {environmentId === null ? (
+        <p className="p-4 text-sm text-muted-foreground">
+          Connect an environment to run T3 diagnostics.
+        </p>
+      ) : (
+        <OperationalStatus
+          key={environmentId}
+          environmentId={environmentId}
+          traces={data}
+          onRun={() => {
+            refresh();
+            refreshProcesses();
+            refreshResources();
+          }}
+        />
+      )}
+      {environmentId !== null && environmentId === primaryEnvironment?.environmentId ? (
+        <ResourceTelemetryDiagnostics />
+      ) : null}
 
       <SettingsSection
+        id="live-processes"
         title="Live Processes"
         headerAction={
           <div className="flex items-center gap-1.5">

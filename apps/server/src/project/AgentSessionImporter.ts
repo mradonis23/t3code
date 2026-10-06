@@ -226,6 +226,7 @@ function bindingResumesCodexSession(
 /** Import recent transcript text and persist the cursor needed to resume its provider session. */
 export const importRecentAgentThreads = Effect.fn("importRecentAgentThreads")(function* (
   input: AgentSessionImportInput,
+  options?: { readonly reconcileThreadIds: ReadonlySet<ThreadId> },
 ) {
   const scanner = yield* AgentSessionScanner.AgentSessionScanner;
   const engine = yield* OrchestrationEngine.OrchestrationEngineService;
@@ -257,7 +258,10 @@ export const importRecentAgentThreads = Effect.fn("importRecentAgentThreads")(fu
     );
   const threads = scanner.recentThreads(
     workspaceRoot,
-    completedSources.map((entry) => entry.source),
+    completedSources
+      .filter((entry) => options === undefined || options.reconcileThreadIds.has(entry.threadId))
+      .map((entry) => entry.source),
+    options !== undefined,
   );
   const importedThreadIds = new Set<ThreadId>();
   let importedCount = 0;
@@ -294,11 +298,22 @@ export const importRecentAgentThreads = Effect.fn("importRecentAgentThreads")(fu
       const threadId = ThreadId.make(
         `import:${thread.providerInstanceId}:${thread.providerSessionId}`,
       );
+      if (options !== undefined && !options.reconcileThreadIds.has(threadId)) return;
       const imported = yield* Effect.gen(function* () {
         const provider = ProviderDriverKind.make(thread.source);
         const model = thread.model ?? DEFAULT_MODEL_BY_PROVIDER[provider] ?? DEFAULT_MODEL;
         const existingThread = yield* snapshots.getThreadDetailById(threadId);
         const existingBinding = yield* directory.getBinding(threadId);
+        if (
+          options !== undefined &&
+          (Option.isNone(existingThread) ||
+            Option.isNone(existingBinding) ||
+            !bindingResumesCodexSession(existingBinding.value, thread.providerSessionId) ||
+            existingBinding.value.providerInstanceId !== thread.providerInstanceId ||
+            (existingThread.value.session !== null &&
+              existingThread.value.session.status !== "stopped"))
+        )
+          return false;
 
         if (
           thread.source === "claudeAgent" &&
@@ -333,6 +348,14 @@ export const importRecentAgentThreads = Effect.fn("importRecentAgentThreads")(fu
             }
             if (suffix.length > 0) {
               if (!bindingResumesCodexSession(existingBinding.value, thread.providerSessionId)) {
+                return yield* new AgentSessionThreadModifiedError({ threadId });
+              }
+              const currentBinding = yield* directory.getBinding(threadId);
+              if (
+                Option.isNone(currentBinding) ||
+                !bindingResumesCodexSession(currentBinding.value, thread.providerSessionId) ||
+                currentBinding.value.providerInstanceId !== existingBinding.value.providerInstanceId
+              ) {
                 return yield* new AgentSessionThreadModifiedError({ threadId });
               }
               yield* engine.dispatch({

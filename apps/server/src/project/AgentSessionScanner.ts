@@ -164,6 +164,7 @@ export class AgentSessionScanner extends Context.Service<
     readonly recentThreads: (
       workspaceRoot: string,
       completedSources?: ReadonlyArray<AgentSessionImportSource>,
+      knownSourcesOnly?: boolean,
     ) => Stream.Stream<AgentSessionRecentThread, AgentSessionScanError>;
   }
 >()("t3/project/AgentSessionScanner") {}
@@ -1233,6 +1234,7 @@ export const make = Effect.gen(function* () {
   const prepareRecentThreads = Effect.fn("AgentSessionScanner.prepareRecentThreads")(function* (
     workspaceRoot: string,
     completedSources: ReadonlyArray<AgentSessionImportSource>,
+    knownSourcesOnly: boolean,
   ) {
     const root = path.resolve(expandHomePath(workspaceRoot));
     const realRoot = yield* fileSystem.realPath(root).pipe(Effect.orElseSucceed(() => root));
@@ -1242,8 +1244,19 @@ export const make = Effect.gen(function* () {
     const cutoffMs = nowMs - RECENT_THREAD_WINDOW_MS;
 
     const cached = cachedCandidates;
-    cachedCandidates = null;
-    const candidates = cached ?? (yield* collectCandidates()).candidates;
+    if (!knownSourcesOnly) cachedCandidates = null;
+    // Scheduled reconciliation only stats recorded paths. It must not discover
+    // new sessions or walk every account's native session directory each minute.
+    const candidates: ReadonlyArray<RawCandidate> = knownSourcesOnly
+      ? completedSources.map((source) => ({
+          cwd: root,
+          source: source.provider,
+          providerInstanceId: source.providerInstanceId,
+          threadCount: 1,
+          lastActiveAtMs: source.mtimeMs,
+          transcripts: [{ filePath: source.filePath, mtimeMs: source.mtimeMs }],
+        }))
+      : (cached ?? (yield* collectCandidates()).candidates);
 
     const eligibleTranscripts: Array<{
       readonly candidate: RawCandidate;
@@ -1258,7 +1271,7 @@ export const make = Effect.gen(function* () {
       for (const transcript of candidate.transcripts) {
         if (
           transcript.mtimeMs === null ||
-          transcript.mtimeMs < cutoffMs ||
+          (!knownSourcesOnly && transcript.mtimeMs < cutoffMs) ||
           transcript.mtimeMs > nowMs
         ) {
           continue;
@@ -1359,7 +1372,9 @@ export const make = Effect.gen(function* () {
               source: candidate.source,
               providerInstanceId: candidate.providerInstanceId,
               fallbackSessionId: path.basename(transcript.filePath, ".jsonl"),
-              lastActiveAtMs: transcript.mtimeMs,
+              lastActiveAtMs: knownSourcesOnly
+                ? (identity.mtimeMs ?? transcript.mtimeMs)
+                : transcript.mtimeMs,
             },
             lines,
           );
@@ -1393,7 +1408,8 @@ export const make = Effect.gen(function* () {
   const recentThreads: AgentSessionScanner["Service"]["recentThreads"] = (
     workspaceRoot,
     completedSources = [],
-  ) => Stream.unwrap(prepareRecentThreads(workspaceRoot, completedSources));
+    knownSourcesOnly = false,
+  ) => Stream.unwrap(prepareRecentThreads(workspaceRoot, completedSources, knownSourcesOnly));
 
   return AgentSessionScanner.of({ scan, recentThreads });
 });

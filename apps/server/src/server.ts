@@ -119,6 +119,9 @@ import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
+import * as OperationalDiagnostics from "./diagnostics/OperationalDiagnostics.ts";
+import * as NativeHistoryReconciler from "./project/NativeHistoryReconciler.ts";
+import * as AgentSessionScanner from "./project/AgentSessionScanner.ts";
 import * as DesktopTelemetryReceiver from "./resourceTelemetry/DesktopTelemetryReceiver.ts";
 import * as NativeTelemetryClient from "./resourceTelemetry/NativeTelemetryClient.ts";
 import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts";
@@ -515,6 +518,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
 );
 
 const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
+  Layer.provideMerge(OperationalDiagnostics.layer.pipe(Layer.provide(RuntimeCoreDependenciesLive))),
   // Misc.
   Layer.provideMerge(BackgroundLayerLive),
   Layer.provideMerge(ResourceDiagnosticsLayerLive),
@@ -760,6 +764,7 @@ export const makeServerLayer = Layer.unwrap(
       runtimeStateLayer,
       tailscaleServeLayer,
       cloudDesiredLinkReconcileLayer,
+      NativeHistoryReconciler.layer.pipe(Layer.provide(AgentSessionScanner.layer)),
     );
 
     return serverApplicationLayer.pipe(

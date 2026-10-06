@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  ActivityIcon,
   ArchiveIcon,
   BlocksIcon,
   BotIcon,
@@ -79,6 +80,7 @@ const SETTINGS_SECTION_ICONS: Readonly<
   "/settings/integrations": BlocksIcon,
   "/settings/source-control": GitBranchIcon,
   "/settings/connections": Link2Icon,
+  "/settings/diagnostics": ActivityIcon,
   "/settings/archived": ArchiveIcon,
 };
 
@@ -117,6 +119,12 @@ const SETTINGS_PAGE_SECTIONS: Partial<
   "/settings/connections": [
     { label: "This environment", targetId: "connections-environment" },
     { label: "Remote environments", targetId: "remote-environments" },
+  ],
+  "/settings/diagnostics": [
+    { label: "T3 Status", targetId: "t3-status" },
+    { label: "Native Sessions", targetId: "native-sessions" },
+    { label: "Work Queue", targetId: "work-queue" },
+    { label: "System", targetId: "live-processes" },
   ],
 };
 

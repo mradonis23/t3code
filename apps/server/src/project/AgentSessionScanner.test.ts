@@ -1253,6 +1253,70 @@ it.layer(NodeServices.layer)("AgentSessionScanner", (it) => {
   });
 
   describe("recentThreads", () => {
+    it.effect(
+      "reconciles only recorded paths without filesystem discovery, including older imports",
+      () =>
+        Effect.gen(function* () {
+          const path = yield* Path.Path;
+          const fs = yield* FileSystem.FileSystem;
+          const nowMs = Date.parse("2026-08-24T12:00:00.000Z");
+          yield* TestClock.setTime(nowMs);
+          const claudeHomePath = yield* makeTempDir("t3-reconcile-claude-");
+          const codexHomePath = yield* makeTempDir("t3-reconcile-codex-");
+          const workspace = yield* makeTempDir("t3-reconcile-workspace-");
+          const filePath = path.join(
+            codexHomePath,
+            "sessions",
+            "2026",
+            "08",
+            "24",
+            "rollout-native.jsonl",
+          );
+          const contents = [
+            encodeTranscriptRecord({
+              type: "session_meta",
+              payload: { id: "native-id", cwd: workspace },
+            }),
+            encodeTranscriptRecord({
+              type: "event_msg",
+              payload: { type: "user_message", message: "Original" },
+            }),
+          ].join("\n");
+          yield* writeTranscript({ filePath, contents, mtimeMs: nowMs });
+          const initial = yield* runRecentThreadOutcomes({
+            claudeHomePath,
+            codexHomePath,
+            workspaceRoot: workspace,
+          });
+          const imported = initial[0];
+          if (imported?._tag !== "Importable") throw new Error("Expected an importable fixture");
+          yield* TestClock.setTime(nowMs + 60 * 24 * 60 * 60 * 1000);
+          yield* writeTranscript({
+            filePath,
+            contents: `${contents}\n${encodeTranscriptRecord({ type: "event_msg", payload: { type: "agent_message", message: "New tail" } })}`,
+            mtimeMs: nowMs + 1000,
+          });
+          const noDiscoveryFs = FileSystem.FileSystem.of({
+            ...fs,
+            readDirectory: () =>
+              Effect.die("Reconciliation must not discover transcript directories"),
+          });
+          const outcomes = yield* Effect.gen(function* () {
+            const scanner = yield* AgentSessionScanner.AgentSessionScanner;
+            return yield* scanner
+              .recentThreads(workspace, [imported.source], true)
+              .pipe(Stream.runCollect);
+          }).pipe(
+            Effect.provide(makeScannerTestLayer({ claudeHomePath, codexHomePath })),
+            Effect.provideService(FileSystem.FileSystem, noDiscoveryFs),
+          );
+          expect(outcomes[0]).toMatchObject({
+            _tag: "Importable",
+            thread: { providerSessionId: "native-id" },
+          });
+          expect(outcomes).toHaveLength(1);
+        }),
+    );
     it.effect.each([false, true])(
       "counts terminal newlines correctly with record overflow=%s",
       (overflow) =>

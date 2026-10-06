@@ -1011,6 +1011,10 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:provider:install-remove",
       tag: WS_METHODS.providerInstallRemove,
     }),
+    operationalDiagnostics: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:server:operational-diagnostics",
+      tag: WS_METHODS.serverGetOperationalDiagnostics,
+    }),
     traceDiagnostics: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:trace-diagnostics",
       tag: WS_METHODS.serverGetTraceDiagnostics,

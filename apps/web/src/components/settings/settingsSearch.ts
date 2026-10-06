@@ -301,7 +301,7 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "diagnostics",
-    title: "T3 Command Center",
+    title: "Diagnostics / T3 Status",
     to: "/settings/diagnostics",
     searchTerms: [
       "diagnostics status health logs traces processes resource history failures spans cpu memory disk backup native sessions queue desktop fold",

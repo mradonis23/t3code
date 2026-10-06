@@ -168,6 +168,7 @@ import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
+import * as OperationalDiagnostics from "./diagnostics/OperationalDiagnostics.ts";
 import * as DesktopTelemetryReceiver from "./resourceTelemetry/DesktopTelemetryReceiver.ts";
 import * as NativeTelemetryClient from "./resourceTelemetry/NativeTelemetryClient.ts";
 import * as ResourceAttribution from "./resourceTelemetry/ResourceAttribution.ts";
@@ -847,6 +848,9 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide([
+        Layer.mock(OperationalDiagnostics.OperationalDiagnostics)({
+          read: Effect.die("Operational diagnostics must be explicitly provided when tested"),
+        }),
         HostResources.layer,
         Layer.mock(ProcessResourceMonitor.ProcessResourceMonitor)({
           readHistory: (input) =>
@@ -6766,6 +6770,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         contents: "export const answer = 42;\n",
         byteLength: 26,
         truncated: false,
+        revision: NodeCrypto.createHash("sha256")
+          .update("export const answer = 42;\n")
+          .digest("hex"),
       });
     }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );

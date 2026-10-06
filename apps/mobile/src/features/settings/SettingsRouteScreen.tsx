@@ -972,6 +972,7 @@ function AppSettingsSection() {
 
   return (
     <SettingsSection title="App">
+      <SettingsRow icon="waveform.path.ecg" label="T3 Status" target="SettingsDiagnostics" />
       <SettingsRow icon="internaldrive" label="Client Storage" target="SettingsClientStorage" />
       <SettingsRow icon="doc.text" label="Legal" fullScreenTarget="SettingsLegal" />
       {updateCheckAvailable ? (

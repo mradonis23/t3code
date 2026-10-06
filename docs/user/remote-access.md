@@ -186,3 +186,20 @@ Include the diagnostic message and trace ID when reporting a persistent failure.
 
 For a connection that still fails after linking, check the date and time on both
 devices. For server version warnings, follow [Updating T3 Code](./updating.md).
+
+## Check T3 Status
+
+Open **Settings → Diagnostics / T3 Status** on web or desktop, or **Settings →
+T3 Status** on mobile. Choose an environment and run **T3
+diagnostics** to check backend reachability, storage, connected devices, provider
+authentication, native session attachments, and recent errors. Copy the summary
+on web or desktop, or share it from mobile when reporting a problem.
+
+The work summary covers that environment's threads. Queued and paused messages
+belong to the device you are using, so another device's unsent messages do not
+appear there. Cached sync state and unavailable checks are labeled. Host-service
+state and other devices' sync progress are unavailable through this page.
+
+Imported Codex conversations reconcile safe native history periodically while
+their attachment is stopped. Running native sessions are left to their current
+writer. Native IDs are available under **Details / Advanced**.

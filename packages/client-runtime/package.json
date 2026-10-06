@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./diagnostics": {
+      "types": "./src/diagnostics.ts",
+      "default": "./src/diagnostics.ts"
+    },
     "./account-recovery": {
       "types": "./src/accountRecovery.ts",
       "default": "./src/accountRecovery.ts"

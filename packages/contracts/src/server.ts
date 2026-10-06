@@ -344,6 +344,73 @@ export const ServerTraceDiagnosticsResult = Schema.Struct({
 });
 export type ServerTraceDiagnosticsResult = typeof ServerTraceDiagnosticsResult.Type;
 
+export const ServerOperationalStorageStatus = Schema.Literals([
+  "ok",
+  "warning",
+  "critical",
+  "unavailable",
+]);
+export type ServerOperationalStorageStatus = typeof ServerOperationalStorageStatus.Type;
+
+export const ServerOperationalNativeSession = Schema.Struct({
+  threadId: ThreadId,
+  provider: ProviderDriverKind,
+  providerInstanceId: Schema.optional(ProviderInstanceId),
+  status: Schema.optional(TrimmedNonEmptyString),
+  nativeSessionId: Schema.NullOr(TrimmedNonEmptyString),
+  resumable: Schema.Boolean,
+  lastSeenAt: IsoDateTime,
+  lastSynchronizedAt: Schema.NullOr(IsoDateTime),
+});
+export type ServerOperationalNativeSession = typeof ServerOperationalNativeSession.Type;
+
+export const ServerOperationalDiagnosticsResult = Schema.Struct({
+  readAt: IsoDateTime,
+  baseDir: TrimmedNonEmptyString,
+  database: Schema.Struct({
+    path: TrimmedNonEmptyString,
+    status: ServerOperationalStorageStatus,
+    sizeBytes: Schema.NullOr(NonNegativeInt),
+    modifiedAt: Schema.NullOr(IsoDateTime),
+    queryStatus: Schema.Literals(["ok", "unavailable"]),
+  }),
+  disk: Schema.Struct({
+    path: TrimmedNonEmptyString,
+    status: ServerOperationalStorageStatus,
+    totalBytes: Schema.NullOr(NonNegativeInt),
+    freeBytes: Schema.NullOr(NonNegativeInt),
+    freePercent: Schema.NullOr(Schema.Number),
+  }),
+  runtimeScratch: Schema.Struct({
+    path: TrimmedNonEmptyString,
+    status: ServerOperationalStorageStatus,
+    launchDirectoryCount: NonNegativeInt,
+    meiDirectoryCount: NonNegativeInt,
+    sampledBytes: NonNegativeInt,
+    scanTruncated: Schema.Boolean,
+  }),
+  backup: Schema.Struct({
+    directory: Schema.NullOr(TrimmedNonEmptyString),
+    latestPath: Schema.NullOr(TrimmedNonEmptyString),
+    latestModifiedAt: Schema.NullOr(IsoDateTime),
+    scanTruncated: Schema.Boolean,
+  }),
+  nativeSessions: Schema.Array(ServerOperationalNativeSession),
+  nativeSessionsAvailable: Schema.Boolean,
+  clients: Schema.NullOr(
+    Schema.Array(
+      Schema.Struct({
+        label: Schema.NullOr(TrimmedNonEmptyString),
+        surface: Schema.NullOr(TrimmedNonEmptyString),
+        deviceType: TrimmedNonEmptyString,
+        connected: Schema.Boolean,
+        lastConnectedAt: Schema.NullOr(IsoDateTime),
+      }),
+    ),
+  ),
+});
+export type ServerOperationalDiagnosticsResult = typeof ServerOperationalDiagnosticsResult.Type;
+
 export const ServerProcessSignal = Schema.Literals(["SIGINT", "SIGKILL"]);
 export type ServerProcessSignal = typeof ServerProcessSignal.Type;
 
