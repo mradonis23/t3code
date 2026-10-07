@@ -97,7 +97,8 @@ function EnvironmentDiagnostics({
         environmentId,
         threads: snapshot?.threads ?? [],
         queue: Object.values(queues).flat(),
-        now: [report.data?.readAt ?? "", snapshot?.updatedAt ?? ""].toSorted().at(-1) ?? "",
+        // Hermes does not ship Array.prototype.toSorted(); sort a fresh literal instead.
+        now: [report.data?.readAt ?? "", snapshot?.updatedAt ?? ""].sort().at(-1) ?? "",
       }),
     [environmentId, snapshot, queues, report.data?.readAt],
   );
